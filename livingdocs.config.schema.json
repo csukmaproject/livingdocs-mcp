@@ -1,6 +1,150 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$comment": "Placeholder — real doc-node schema is drafted and frozen in Phase 1 (APPROVAL GATE 1). Do not build extraction logic against this stub.",
-  "title": "livingdocs.config",
-  "type": "object"
+  "$id": "https://github.com/csukmaproject/livingdocs-mcp/livingdocs.config.schema.json",
+  "title": "DocNode",
+  "description": "One entry in the doc graph. Frozen at Phase 1 (APPROVAL GATE 1) — see docs/annotation-tags.md for the annotation vocabulary this is extracted from.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "nodeId",
+    "filePath",
+    "entityName",
+    "entityType",
+    "contentHash",
+    "agentContract",
+    "humanNarrative",
+    "confidence",
+    "revisionHistory",
+    "tags"
+  ],
+  "properties": {
+    "nodeId": {
+      "type": "string",
+      "description": "Stable, deterministic id: `${filePath}#${entityName}:${entityType}`.",
+      "examples": ["src/discounts.ts#normalizeDiscountCode:function"]
+    },
+    "filePath": {
+      "type": "string",
+      "description": "Path to the source file, relative to the target repo root."
+    },
+    "entityName": {
+      "type": "string"
+    },
+    "entityType": {
+      "type": "string",
+      "enum": [
+        "function",
+        "method",
+        "class",
+        "interface",
+        "type",
+        "module",
+        "endpoint",
+        "service",
+        "variable",
+        "constant"
+      ]
+    },
+    "contentHash": {
+      "type": "string",
+      "description": "Hash (e.g. sha256) of the exact source range this node was derived from. Mismatch on re-scan means the node is stale."
+    },
+    "agentContract": {
+      "type": "object",
+      "description": "Structured facet for agents (Section 2.1 of docgen-plugin-plan.md).",
+      "additionalProperties": false,
+      "properties": {
+        "signature": {
+          "type": ["string", "null"]
+        },
+        "preconditions": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "postconditions": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "sideEffects": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "['none'] when the @contract side-effects clause is explicitly 'none'."
+        },
+        "errorModes": {
+          "type": "array",
+          "description": "One entry per @contract `throws:` clause. Used by Phase 8's error<->troubleshooting cross-check.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["errorType", "condition"],
+            "properties": {
+              "errorType": { "type": "string" },
+              "condition": { "type": "string" }
+            }
+          }
+        },
+        "dependencies": {
+          "type": "array",
+          "description": "nodeIds this entity calls/imports/depends on. Normally derived from AST edges; @contract's optional `deps:` clause overrides/augments this for dependencies invisible to static analysis.",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "humanNarrative": {
+      "type": "object",
+      "description": "Prose facet for humans (Section 2.1 of docgen-plugin-plan.md).",
+      "additionalProperties": false,
+      "properties": {
+        "purpose": {
+          "type": ["string", "null"],
+          "description": "From @purpose."
+        },
+        "rationale": {
+          "type": ["string", "null"]
+        },
+        "example": {
+          "type": ["string", "null"]
+        },
+        "gotchas": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "confidence": {
+      "type": "object",
+      "description": "Per-field confidence map, dot-path keyed into agentContract/humanNarrative. Deliberately per-field rather than a single node-level value, because Phase 8 requires tagging 'every generated field' individually (docgen-plugin-plan.md Section 2.4) -- e.g. a mechanically-extracted signature and an LLM-inferred rationale on the same node can carry different confidence.",
+      "additionalProperties": {
+        "type": "string",
+        "enum": ["extracted", "verified", "inferred"]
+      },
+      "examples": [
+        {
+          "agentContract.signature": "extracted",
+          "agentContract.errorModes": "extracted",
+          "humanNarrative.purpose": "extracted",
+          "humanNarrative.rationale": "inferred"
+        }
+      ]
+    },
+    "revisionHistory": {
+      "type": "array",
+      "description": "Per-node revision log, independent of the document-level Revision History table (Phase 3).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["commit", "date", "summary"],
+        "properties": {
+          "commit": { "type": "string" },
+          "date": { "type": "string", "format": "date" },
+          "summary": { "type": "string" }
+        }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "description": "Flat key:value tag list, e.g. requirement:REQ-042, audience:business, audience:agent-only. Rollup filters (SRS/PRD/business guide/etc.) select nodes by scanning this array.",
+      "items": { "type": "string" }
+    }
+  }
 }

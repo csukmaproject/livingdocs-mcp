@@ -1,0 +1,11 @@
+{
+  "name": "documented-fixture",
+  "version": "1.0.0",
+  "description": "A tiny fully-annotated app, used to test livingdocs mechanical extraction.",
+  "bin": {
+    "documented-fixture": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "node src/index.ts"
+  }
+}

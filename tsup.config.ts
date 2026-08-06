@@ -12,4 +12,5 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   splitting: false,
+  external: ["tree-sitter", "tree-sitter-typescript", "tree-sitter-javascript"],
 });
