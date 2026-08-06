@@ -1,0 +1,6 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "Placeholder — real doc-node schema is drafted and frozen in Phase 1 (APPROVAL GATE 1). Do not build extraction logic against this stub.",
+  "title": "livingdocs.config",
+  "type": "object"
+}

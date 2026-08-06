@@ -1,0 +1,66 @@
+{
+  "name": "@csukmaproject/livingdocs-mcp",
+  "version": "0.1.0",
+  "description": "MCP server + CLI that keeps software documentation in permanent sync with code, for both AI agents and humans.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "livingdocs": "./dist/cli/index.js",
+    "livingdocs-mcp": "./dist/mcp/server.js"
+  },
+  "main": "./dist/core/index.js",
+  "types": "./dist/core/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src/templates",
+    "livingdocs.config.schema.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "typecheck": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/csukmaproject/livingdocs-mcp.git"
+  },
+  "homepage": "https://github.com/csukmaproject/livingdocs-mcp",
+  "bugs": {
+    "url": "https://github.com/csukmaproject/livingdocs-mcp/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "documentation",
+    "ast",
+    "claude-code",
+    "docs-as-code"
+  ],
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/node": "^22.10.0",
+    "@typescript-eslint/eslint-plugin": "^8.18.0",
+    "@typescript-eslint/parser": "^8.18.0",
+    "eslint": "^9.17.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.4.2",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
