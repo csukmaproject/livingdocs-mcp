@@ -7,3 +7,4 @@ export * from "./extractor.js";
 export * from "./ast-diff.js";
 export * from "./rollup-engine.js";
 export * from "./llm-adapter.js";
+export * from "./revision-writer.js";
