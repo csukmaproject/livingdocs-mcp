@@ -5,7 +5,12 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { extractRepo } from "../../src/core/extractor.js";
 import { diffGraph } from "../../src/core/ast-diff.js";
-import { applyRegeneration, appendDocumentRevisionRow, formatRevisionRow } from "../../src/core/revision-writer.js";
+import {
+  appendDocumentRevisionRow,
+  applyRegeneration,
+  formatRevisionRow,
+  parseDocumentRevisionRows,
+} from "../../src/core/revision-writer.js";
 import type { DocGraph } from "../../src/core/types.js";
 
 const FIXTURE_ROOT = fileURLToPath(new URL("../fixtures/documented", import.meta.url));
@@ -54,6 +59,30 @@ describe("revision-writer: appendDocumentRevisionRow", () => {
       summary: "a | b changed",
     });
     expect(updated).toContain("a \\| b changed");
+  });
+
+  it("round-trips rows written by appendDocumentRevisionRow through parseDocumentRevisionRows", () => {
+    const template = readFileSync(TEMPLATE_PATH, "utf8");
+    const afterFirst = appendDocumentRevisionRow(template, {
+      commit: "abc123",
+      date: "2026-08-06",
+      summary: "a | b changed",
+    });
+    const afterSecond = appendDocumentRevisionRow(afterFirst, {
+      commit: "def456",
+      date: "2026-08-07",
+      summary: "second regeneration",
+    });
+
+    expect(parseDocumentRevisionRows(afterSecond)).toEqual([
+      { commit: "abc123", date: "2026-08-06", summary: "a | b changed" },
+      { commit: "def456", date: "2026-08-07", summary: "second regeneration" },
+    ]);
+  });
+
+  it("returns an empty array when there's no table yet", () => {
+    const template = readFileSync(TEMPLATE_PATH, "utf8");
+    expect(parseDocumentRevisionRows(template)).toEqual([]);
   });
 });
 

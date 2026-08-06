@@ -8,3 +8,5 @@ export * from "./ast-diff.js";
 export * from "./rollup-engine.js";
 export * from "./llm-adapter.js";
 export * from "./revision-writer.js";
+export * from "./git.js";
+export * from "./incremental-extract.js";

@@ -45,6 +45,33 @@ export function appendDocumentRevisionRow(documentMarkdown: string, entry: Revis
   return lines.join("\n");
 }
 
+/** Reads the document-level Revision History table back into structured rows. */
+export function parseDocumentRevisionRows(documentMarkdown: string): RevisionEntry[] {
+  const lines = documentMarkdown.split("\n");
+  const headingIndex = lines.findIndex((line) => line.trim() === REVISION_HEADING);
+  if (headingIndex === -1) return [];
+
+  let cursor = headingIndex + 1;
+  while (cursor < lines.length && lines[cursor]?.trim() === "") cursor++;
+  if ((lines[cursor]?.trim() ?? "") !== TABLE_HEADER) return [];
+  cursor += 2; // skip header + separator
+
+  const rows: RevisionEntry[] = [];
+  while (cursor < lines.length && (lines[cursor]?.trim() ?? "").startsWith("|")) {
+    const line = lines[cursor]?.trim() ?? "";
+    const cells = line
+      .slice(1, -1)
+      .split(/(?<!\\)\|/)
+      .map((c) => c.trim().replace(/\\\|/g, "|"));
+    const [date, commit, summary] = cells;
+    if (date && commit) {
+      rows.push({ date, commit, summary: summary ?? "" });
+    }
+    cursor++;
+  }
+  return rows;
+}
+
 export interface RegenerationResult {
   documentMarkdown: string;
   nodes: DocNode[];

@@ -1,3 +1,4 @@
+import { cpSync } from "node:fs";
 import { defineConfig } from "tsup";
 
 export default defineConfig({
@@ -13,4 +14,9 @@ export default defineConfig({
   clean: true,
   splitting: false,
   external: ["tree-sitter", "tree-sitter-typescript", "tree-sitter-javascript"],
+  onSuccess: async () => {
+    // src/templates must stay a sibling of dist/core the same way it's a
+    // sibling of src/core, since rollup-engine resolves it relative to itself.
+    cpSync("src/templates", "dist/templates", { recursive: true });
+  },
 });

@@ -62,4 +62,11 @@ export interface GraphEdge {
 export interface DocGraph {
   nodes: DocNode[];
   edges: GraphEdge[];
+  /**
+   * Commit the graph was last generated from. Lets scanRepo diff against
+   * committed history since that point, not just the working tree -- a
+   * clean `git status` alone can't tell "nothing changed" apart from
+   * "the graph predates several already-committed changes".
+   */
+  lastScannedCommit?: string;
 }
