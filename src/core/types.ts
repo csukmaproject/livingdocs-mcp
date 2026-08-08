@@ -69,4 +69,6 @@ export interface DocGraph {
    * "the graph predates several already-committed changes".
    */
   lastScannedCommit?: string;
+  /** sectionKey -> ISO date the section's rendered text last actually changed. Read by `livingdocs status`. */
+  sectionSyncDates?: Record<string, string>;
 }

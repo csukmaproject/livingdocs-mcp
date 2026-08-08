@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fileURLToPath } from "node:url";
-import { extractRepo } from "../../src/core/extractor.js";
+import { countDocumentableEntities, extractRepo } from "../../src/core/extractor.js";
 
 const FIXTURE_ROOT = fileURLToPath(new URL("../fixtures/documented", import.meta.url));
 
@@ -45,5 +45,17 @@ describe("extractor", () => {
         expect(value).toBe("extracted");
       }
     }
+  });
+});
+
+describe("countDocumentableEntities", () => {
+  it("counts declarations with or without a doc comment, unlike extractRepo", () => {
+    // The fixture has 3 documentable declarations (normalizeDiscountCode,
+    // InvalidDiscountError, computeTotal) but InvalidDiscountError has no
+    // doc comment, so extractRepo only produces 2 entity nodes for it.
+    const total = countDocumentableEntities(FIXTURE_ROOT);
+    const entityNodes = extractRepo(FIXTURE_ROOT).filter((n) => n.entityType !== "module");
+    expect(total).toBe(3);
+    expect(entityNodes).toHaveLength(2);
   });
 });

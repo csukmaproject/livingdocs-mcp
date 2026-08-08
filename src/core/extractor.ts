@@ -193,11 +193,35 @@ function buildConfidence(node: Pick<DocNode, "agentContract" | "humanNarrative">
   return confidence;
 }
 
-export function extractFile(filePath: string, repoRoot: string): DocNode[] {
+function resolveDeclaration(candidate: Parser.SyntaxNode | undefined): Parser.SyntaxNode | undefined {
+  if (!candidate) return undefined;
+  if (candidate.type === "export_statement") {
+    return candidate.children.find((c) => c.type in DECLARATION_TYPES);
+  }
+  return candidate.type in DECLARATION_TYPES ? candidate : undefined;
+}
+
+function parseSourceFile(filePath: string): { tree: Parser.Tree; source: string } {
   const source = readFileSync(filePath, "utf8");
   const parser = new Parser();
   parser.setLanguage(languageFor(filePath) as Parameters<Parser["setLanguage"]>[0]);
-  const tree = parser.parse(source);
+  return { tree: parser.parse(source), source };
+}
+
+/** Counts every top-level exported function/class/interface/type declaration, with or without a doc comment -- the denominator for annotation coverage. */
+export function countDocumentableEntities(repoRoot: string): number {
+  let count = 0;
+  for (const filePath of walkSourceFiles(repoRoot)) {
+    const { tree } = parseSourceFile(filePath);
+    for (const child of tree.rootNode.children) {
+      if (resolveDeclaration(child)) count++;
+    }
+  }
+  return count;
+}
+
+export function extractFile(filePath: string, repoRoot: string): DocNode[] {
+  const { tree, source } = parseSourceFile(filePath);
   const relativePath = relative(repoRoot, filePath);
   const nodes: DocNode[] = [];
   const topLevel = tree.rootNode.children;
@@ -206,13 +230,7 @@ export function extractFile(filePath: string, repoRoot: string): DocNode[] {
     const child = topLevel[i];
     if (!child || child.type !== "comment" || !child.text.startsWith("/**")) continue;
 
-    const next = topLevel[i + 1];
-    let declNode: Parser.SyntaxNode | undefined;
-    if (next?.type === "export_statement") {
-      declNode = next.children.find((c) => c.type in DECLARATION_TYPES);
-    } else if (next && next.type in DECLARATION_TYPES) {
-      declNode = next;
-    }
+    const declNode = resolveDeclaration(topLevel[i + 1]);
 
     if (declNode) {
       const entityType = DECLARATION_TYPES[declNode.type];

@@ -10,3 +10,4 @@ export * from "./llm-adapter.js";
 export * from "./revision-writer.js";
 export * from "./git.js";
 export * from "./incremental-extract.js";
+export * from "./sync.js";

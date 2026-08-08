@@ -1,50 +1,17 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import {
-  applyRegeneration,
-  buildEdges,
-  getCurrentCommit,
-  generateGettingStarted,
-  generateSystemOverview,
   loadGraph,
   parseDocumentRevisionRows,
-  readPackageMeta,
-  readSectionContent,
-  replaceSectionContent,
-  saveGraph,
+  readUserGuide,
   scanRepo,
-  seedUserGuide,
-  type DocGraph,
+  syncUserGuide,
   type LlmCompletionRequest,
   type LlmCompletionResult,
 } from "../core/index.js";
 import { SamplingProvider } from "../core/llm-adapter.js";
-
-const USER_GUIDE_FILENAME = "USER_GUIDE.md";
-
-function userGuidePath(repoRoot: string): string {
-  return join(repoRoot, USER_GUIDE_FILENAME);
-}
-
-function readUserGuide(repoRoot: string): string {
-  const path = userGuidePath(repoRoot);
-  if (existsSync(path)) return readFileSync(path, "utf8");
-  return seedUserGuide(readPackageMeta(repoRoot));
-}
-
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-/** undefined (not the sentinel) when there's no real commit to diff against next time. */
-function resolveScannedCommit(repoRoot: string): string | undefined {
-  const commit = getCurrentCommit(repoRoot);
-  return commit === "working-tree" ? undefined : commit;
-}
 
 const server = new McpServer({ name: "livingdocs-mcp", version: "0.1.0" });
 
@@ -77,12 +44,7 @@ server.registerTool(
     const { changes, usedGitScoping } = scanRepo(repoRoot, previousGraph);
     const meaningful = changes.filter((c) => c.classification !== "unchanged");
     return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify({ usedGitScoping, changes: meaningful }, null, 2),
-        },
-      ],
+      content: [{ type: "text", text: JSON.stringify({ usedGitScoping, changes: meaningful }, null, 2) }],
     };
   },
 );
@@ -134,45 +96,18 @@ server.registerTool(
     inputSchema: { repoRoot: repoRootSchema },
   },
   async ({ repoRoot }) => {
-    const previousGraph = loadGraph(repoRoot);
-    const { currentNodes, changes } = scanRepo(repoRoot, previousGraph);
-    const pkg = readPackageMeta(repoRoot);
-    const document = readUserGuide(repoRoot);
-
-    const currentGraph: DocGraph = { nodes: currentNodes, edges: buildEdges(currentNodes) };
-    const newSystemOverview = generateSystemOverview(currentGraph, pkg);
-    const newGettingStarted = generateGettingStarted(pkg);
-
-    let updatedDocument = document;
-    const sectionsChanged: string[] = [];
-    if (newSystemOverview !== readSectionContent(document, "system-overview")) {
-      updatedDocument = replaceSectionContent(updatedDocument, "system-overview", newSystemOverview);
-      sectionsChanged.push("system-overview");
-    }
-    if (newGettingStarted !== readSectionContent(document, "getting-started")) {
-      updatedDocument = replaceSectionContent(updatedDocument, "getting-started", newGettingStarted);
-      sectionsChanged.push("getting-started");
-    }
-
-    const regeneration = applyRegeneration(previousGraph, currentNodes, changes, updatedDocument, getCurrentCommit(repoRoot), today());
-
-    saveGraph(repoRoot, {
-      nodes: regeneration.nodes,
-      edges: buildEdges(regeneration.nodes),
-      lastScannedCommit: resolveScannedCommit(repoRoot),
-    });
-    writeFileSync(userGuidePath(repoRoot), regeneration.documentMarkdown, "utf8");
-
+    const result = syncUserGuide(repoRoot);
+    const meaningfulChanges = result.changes.filter((c) => c.classification !== "unchanged");
     return {
       content: [
         {
           type: "text",
           text: JSON.stringify(
             {
-              updated: sectionsChanged.length > 0 || regeneration.addedRevisionRow,
-              sectionsChanged,
-              revisionRowAdded: regeneration.addedRevisionRow,
-              changes: changes.filter((c) => c.classification !== "unchanged"),
+              updated: result.sectionsChanged.length > 0 || result.revisionRowAdded,
+              sectionsChanged: result.sectionsChanged,
+              revisionRowAdded: result.revisionRowAdded,
+              changes: meaningfulChanges,
             },
             null,
             2,
@@ -195,30 +130,13 @@ server.registerTool(
       return {
         isError: true,
         content: [
-          { type: "text", text: `Document type "${type}" isn't implemented yet -- only "user-guide" exists as of Phase 4.` },
+          { type: "text", text: `Document type "${type}" isn't implemented yet -- only "user-guide" exists as of Phase 5.` },
         ],
       };
     }
 
-    const previousGraph = loadGraph(repoRoot);
-    const { currentNodes, changes } = scanRepo(repoRoot, previousGraph);
-    const pkg = readPackageMeta(repoRoot);
-    const currentGraph: DocGraph = { nodes: currentNodes, edges: buildEdges(currentNodes) };
-
-    let document = readUserGuide(repoRoot);
-    document = replaceSectionContent(document, "system-overview", generateSystemOverview(currentGraph, pkg));
-    document = replaceSectionContent(document, "getting-started", generateGettingStarted(pkg));
-
-    const regeneration = applyRegeneration(previousGraph, currentNodes, changes, document, getCurrentCommit(repoRoot), today());
-
-    saveGraph(repoRoot, {
-      nodes: regeneration.nodes,
-      edges: buildEdges(regeneration.nodes),
-      lastScannedCommit: resolveScannedCommit(repoRoot),
-    });
-    writeFileSync(userGuidePath(repoRoot), regeneration.documentMarkdown, "utf8");
-
-    return { content: [{ type: "text", text: regeneration.documentMarkdown }] };
+    const result = syncUserGuide(repoRoot, { force: true });
+    return { content: [{ type: "text", text: result.documentMarkdown }] };
   },
 );
 
