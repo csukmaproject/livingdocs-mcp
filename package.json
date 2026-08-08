@@ -8,8 +8,8 @@
     "node": ">=20"
   },
   "bin": {
-    "livingdocs": "./dist/cli/index.js",
-    "livingdocs-mcp": "./dist/mcp/server.js"
+    "livingdocs": "dist/cli/index.js",
+    "livingdocs-mcp": "dist/mcp/server.js"
   },
   "main": "./dist/core/index.js",
   "types": "./dist/core/index.d.ts",
