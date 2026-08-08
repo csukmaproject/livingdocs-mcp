@@ -1,0 +1,11 @@
+node_modules
+test
+docs
+.github
+docgen-plugin-plan.md
+claude-code-build-brief.md
+tsconfig.json
+tsup.config.ts
+eslint.config.js
+.prettierrc.json
+vitest.config.ts
