@@ -1,0 +1,8 @@
+{
+  "name": "greenfield-fixture",
+  "version": "0.1.0",
+  "description": "A brand-new project annotated from day one -- used to test livingdocs against a repo that never needed a bootstrap.",
+  "scripts": {
+    "start": "node src/index.ts"
+  }
+}
