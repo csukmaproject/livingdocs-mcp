@@ -3,13 +3,20 @@ import { join } from "node:path";
 import { buildEdges, loadGraph, saveGraph } from "./doc-graph.js";
 import { getCurrentCommit } from "./git.js";
 import { scanRepo } from "./incremental-extract.js";
+import type { LlmAdapter } from "./llm-adapter.js";
+import { generateErrorResolutions, generateNarratives } from "./narrative-generator.js";
 import {
+  collectErrorContexts,
+  crossCheckErrorsAndTroubleshooting,
+  generateCoreFeatures,
   generateGettingStarted,
   generateSystemOverview,
+  generateTroubleshooting,
   readPackageMeta,
   readSectionContent,
   replaceSectionContent,
   seedUserGuide,
+  type ErrorTroubleshootingCrossCheck,
 } from "./rollup-engine.js";
 import { applyRegeneration } from "./revision-writer.js";
 import type { NodeChange } from "./ast-diff.js";
@@ -38,8 +45,14 @@ function resolveScannedCommit(repoRoot: string): string | undefined {
 }
 
 export interface SyncOptions {
-  /** Force-regenerate both sections' text even if nothing changed underneath (generate_rollup / `generate user-guide`). */
+  /** Force-regenerate every section's text even if nothing changed underneath (generate_rollup / `generate user-guide`). */
   force?: boolean;
+  /**
+   * When provided, also (re)generates Section 4 (Core Features) and
+   * Section 5 (Troubleshooting) -- the LLM-heavy rollups (Phase 8).
+   * Omitted, syncUserGuide only touches the zero-LLM sections 2-3.
+   */
+  llm?: LlmAdapter;
 }
 
 export interface SyncResult {
@@ -48,27 +61,32 @@ export interface SyncResult {
   sectionsChanged: string[];
   revisionRowAdded: boolean;
   documentMarkdown: string;
+  crossCheck?: ErrorTroubleshootingCrossCheck;
 }
 
 /**
  * Reads, recomputes, and writes the user guide + graph in one place --
  * shared by the MCP server's update_doc/generate_rollup tools and the
- * CLI's update/generate commands (docs/build brief Phase 5: "CLI uses the
+ * CLI's update/generate commands (build brief Phase 5: "CLI uses the
  * same core as the MCP server"), so the two surfaces can't drift the way
  * scanRepo's git-scoping once did between them.
  */
-export function syncUserGuide(repoRoot: string, options: SyncOptions = {}): SyncResult {
+export async function syncUserGuide(repoRoot: string, options: SyncOptions = {}): Promise<SyncResult> {
   const previousGraph = loadGraph(repoRoot);
-  const { currentNodes, changes } = scanRepo(repoRoot, previousGraph);
+  const { currentNodes: scannedNodes, changes } = scanRepo(repoRoot, previousGraph);
   const pkg = readPackageMeta(repoRoot);
   const document = readUserGuide(repoRoot);
-  const currentGraph: DocGraph = { nodes: currentNodes, edges: buildEdges(currentNodes) };
 
-  const newSystemOverview = generateSystemOverview(currentGraph, pkg);
+  let currentNodes = scannedNodes;
+  const errorResolutions: Record<string, string> = { ...previousGraph.errorResolutions };
+  let crossCheck: ErrorTroubleshootingCrossCheck | undefined;
+  const sectionsChanged: string[] = [];
+  let updatedDocument = document;
+
+  const graphBeforeNarratives: DocGraph = { nodes: currentNodes, edges: buildEdges(currentNodes) };
+  const newSystemOverview = generateSystemOverview(graphBeforeNarratives, pkg);
   const newGettingStarted = generateGettingStarted(pkg);
 
-  let updatedDocument = document;
-  const sectionsChanged: string[] = [];
   if (options.force || newSystemOverview !== readSectionContent(document, "system-overview")) {
     updatedDocument = replaceSectionContent(updatedDocument, "system-overview", newSystemOverview);
     sectionsChanged.push("system-overview");
@@ -76,6 +94,34 @@ export function syncUserGuide(repoRoot: string, options: SyncOptions = {}): Sync
   if (options.force || newGettingStarted !== readSectionContent(document, "getting-started")) {
     updatedDocument = replaceSectionContent(updatedDocument, "getting-started", newGettingStarted);
     sectionsChanged.push("getting-started");
+  }
+
+  if (options.llm) {
+    const narrativeResult = await generateNarratives(options.llm, currentNodes, previousGraph, changes);
+    currentNodes = narrativeResult.nodes;
+
+    const currentGraph: DocGraph = { nodes: currentNodes, edges: buildEdges(currentNodes) };
+    const errorContexts = collectErrorContexts(currentGraph);
+    const errorTypesNeedingResolution = [...errorContexts.keys()].filter((errorType) => !(errorType in errorResolutions));
+    if (errorTypesNeedingResolution.length > 0) {
+      const { resolutions } = await generateErrorResolutions(options.llm, errorTypesNeedingResolution, errorContexts);
+      for (const [errorType, resolution] of resolutions) errorResolutions[errorType] = resolution;
+    }
+
+    const resolutionsMap = new Map(Object.entries(errorResolutions));
+    const newCoreFeatures = generateCoreFeatures(currentGraph);
+    const newTroubleshooting = generateTroubleshooting(currentGraph, resolutionsMap);
+
+    if (options.force || newCoreFeatures !== readSectionContent(document, "core-features")) {
+      updatedDocument = replaceSectionContent(updatedDocument, "core-features", newCoreFeatures);
+      sectionsChanged.push("core-features");
+    }
+    if (options.force || newTroubleshooting !== readSectionContent(document, "troubleshooting")) {
+      updatedDocument = replaceSectionContent(updatedDocument, "troubleshooting", newTroubleshooting);
+      sectionsChanged.push("troubleshooting");
+    }
+
+    crossCheck = crossCheckErrorsAndTroubleshooting(currentGraph, newTroubleshooting);
   }
 
   const date = today();
@@ -89,6 +135,7 @@ export function syncUserGuide(repoRoot: string, options: SyncOptions = {}): Sync
     edges: buildEdges(regeneration.nodes),
     lastScannedCommit: resolveScannedCommit(repoRoot),
     sectionSyncDates,
+    errorResolutions,
   });
   writeFileSync(userGuidePath(repoRoot), regeneration.documentMarkdown, "utf8");
 
@@ -98,5 +145,6 @@ export function syncUserGuide(repoRoot: string, options: SyncOptions = {}): Sync
     sectionsChanged,
     revisionRowAdded: regeneration.addedRevisionRow,
     documentMarkdown: regeneration.documentMarkdown,
+    crossCheck,
   };
 }

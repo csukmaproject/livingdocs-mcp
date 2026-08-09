@@ -103,7 +103,12 @@ describe("livingdocs CLI (built binary)", () => {
       const after = runCli(["status", "--repo", tmp]);
       expect(after.stdout).toContain("Coverage: 67%");
       expect(after.stdout).toContain("Stale nodes: none");
-      expect(after.stdout).not.toContain("never");
+      expect(after.stdout).toContain("system-overview: 20"); // real date, not "never"
+      expect(after.stdout).toContain("getting-started: 20");
+      // No ANTHROPIC_API_KEY in this test env, so the LLM-heavy sections
+      // correctly never ran -- still "never" here, not a bug.
+      expect(after.stdout).toContain("core-features: never");
+      expect(after.stdout).toContain("troubleshooting: never");
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

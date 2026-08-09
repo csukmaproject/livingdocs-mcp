@@ -28,7 +28,6 @@ const samplingProvider = new SamplingProvider(
     return { text };
   },
 );
-void samplingProvider; // wired up for Phase 8+ generation; unused while only zero-LLM rollups exist.
 
 const repoRootSchema = z.string().describe("Absolute path to the target repo to analyze.");
 
@@ -96,7 +95,7 @@ server.registerTool(
     inputSchema: { repoRoot: repoRootSchema },
   },
   async ({ repoRoot }) => {
-    const result = syncUserGuide(repoRoot);
+    const result = await syncUserGuide(repoRoot, { llm: samplingProvider });
     const meaningfulChanges = result.changes.filter((c) => c.classification !== "unchanged");
     return {
       content: [
@@ -108,6 +107,7 @@ server.registerTool(
               sectionsChanged: result.sectionsChanged,
               revisionRowAdded: result.revisionRowAdded,
               changes: meaningfulChanges,
+              crossCheck: result.crossCheck,
             },
             null,
             2,
@@ -135,8 +135,14 @@ server.registerTool(
       };
     }
 
-    const result = syncUserGuide(repoRoot, { force: true });
-    return { content: [{ type: "text", text: result.documentMarkdown }] };
+    const result = await syncUserGuide(repoRoot, { force: true, llm: samplingProvider });
+    return {
+      content: [{ type: "text", text: result.documentMarkdown }],
+      ...(result.crossCheck &&
+      (result.crossCheck.missingFromTroubleshooting.length > 0 || result.crossCheck.orphanedInTroubleshooting.length > 0)
+        ? { _meta: { crossCheck: result.crossCheck } }
+        : {}),
+    };
   },
 );
 

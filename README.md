@@ -9,11 +9,13 @@ affects. Updates are append-only — every doc change and every revision
 row is traceable to the commit that caused it.
 
 Status: v0.1.0. Core extraction, revision history, the MCP server (5
-tools), and the CLI (4 commands) are implemented against the User Guide's
-System Overview and Getting Started sections; confidence tagging and the
-richer rollups (Core Features, Troubleshooting, PRD, SRS, business guide)
-land in later phases. See `docgen-plugin-plan.md` for the full
-architecture rationale.
+tools), and the CLI (4 commands) cover all six User Guide sections:
+System Overview and Getting Started are pure templating (zero LLM calls);
+Core Features and Troubleshooting are the first LLM-heavy rollups, routed
+through `llm-adapter.ts` with confidence tagged per field
+(`extracted`/`inferred`) and only regenerated for entities that actually
+changed. The PRD/SRS/business-guide rollups land in Phase 10. See
+`docgen-plugin-plan.md` for the full architecture rationale.
 
 ## Install
 
@@ -86,6 +88,11 @@ npx --package=@csukmaproject/livingdocs-mcp livingdocs status
 
 Once installed as a project dependency, you can drop the `--package` and
 just run `livingdocs <command>`.
+
+There's no MCP host to borrow a model from out here, so `update` and
+`generate` fall back to a direct API key for the Core Features /
+Troubleshooting sections: set `ANTHROPIC_API_KEY` in your environment, or
+they're skipped (the other sections still update normally).
 
 ## License
 

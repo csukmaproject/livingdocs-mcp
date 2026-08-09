@@ -120,3 +120,109 @@ export function replaceSectionContent(documentMarkdown: string, sectionKey: stri
   const body = content.trim().length > 0 ? ["", content.trim(), ""] : [""];
   return [...before, ...body, ...after].join("\n");
 }
+
+/**
+ * User guide Section 4 (Core Features) -- one subsection per documented
+ * entity. Signature/purpose/error-modes are extracted (mechanical);
+ * rationale/example/gotchas are filled in by narrative-generator.ts when
+ * an LLM adapter is available, and left blank otherwise.
+ */
+export function generateCoreFeatures(graph: DocGraph): string {
+  const entityNodes = graph.nodes.filter((n) => n.entityType !== "module");
+  if (entityNodes.length === 0) return "_No documented features yet._";
+
+  return entityNodes
+    .map((node) => {
+      const lines = [`### ${node.entityName}`, "", "```", node.agentContract.signature, "```"];
+      if (node.humanNarrative.purpose) lines.push("", node.humanNarrative.purpose);
+      if (node.humanNarrative.rationale) lines.push("", node.humanNarrative.rationale);
+      if (node.humanNarrative.example) lines.push("", "**Example:**", "", node.humanNarrative.example);
+      if (node.humanNarrative.gotchas.length > 0) {
+        lines.push("", "**Gotchas:**");
+        for (const gotcha of node.humanNarrative.gotchas) lines.push(`- ${gotcha}`);
+      }
+      return lines.join("\n");
+    })
+    .join("\n\n");
+}
+
+/** Every distinct error type declared across the graph's nodes, each with the conditions that throw it (for prompting/context). */
+export function collectErrorContexts(graph: DocGraph): Map<string, string[]> {
+  const contexts = new Map<string, string[]>();
+  for (const node of graph.nodes) {
+    for (const errorMode of node.agentContract.errorModes) {
+      const existing = contexts.get(errorMode.errorType) ?? [];
+      existing.push(errorMode.condition || `thrown by ${node.entityName}`);
+      contexts.set(errorMode.errorType, existing);
+    }
+  }
+  return contexts;
+}
+
+const TROUBLESHOOTING_HEADER = "| Error | Thrown by | When | Suggested resolution |";
+const TROUBLESHOOTING_SEPARATOR = "| --- | --- | --- | --- |";
+
+/**
+ * User guide Section 5 (Troubleshooting) -- one row per distinct error
+ * type. `resolutions` maps errorType -> a suggested-fix sentence; entries
+ * with no resolution yet render with a placeholder rather than a blank
+ * cell, so a missing generation is visible instead of silently blank.
+ */
+export function generateTroubleshooting(graph: DocGraph, resolutions: Map<string, string>): string {
+  const throwers = new Map<string, Set<string>>();
+  const conditions = new Map<string, Set<string>>();
+  for (const node of graph.nodes) {
+    for (const errorMode of node.agentContract.errorModes) {
+      const throwerSet = throwers.get(errorMode.errorType) ?? new Set<string>();
+      throwerSet.add(node.entityName);
+      throwers.set(errorMode.errorType, throwerSet);
+      const conditionSet = conditions.get(errorMode.errorType) ?? new Set<string>();
+      if (errorMode.condition) conditionSet.add(errorMode.condition);
+      conditions.set(errorMode.errorType, conditionSet);
+    }
+  }
+
+  const errorTypes = [...throwers.keys()].sort();
+  if (errorTypes.length === 0) return "_No known error modes yet._";
+
+  const rows = errorTypes.map((errorType) => {
+    const thrownBy = [...(throwers.get(errorType) ?? [])].join(", ");
+    const when = [...(conditions.get(errorType) ?? [])].join("; ") || "(unspecified)";
+    const resolution = resolutions.get(errorType) ?? "_(not yet generated)_";
+    return `| ${errorType} | ${thrownBy} | ${when} | ${resolution} |`;
+  });
+
+  return [TROUBLESHOOTING_HEADER, TROUBLESHOOTING_SEPARATOR, ...rows].join("\n");
+}
+
+function parseTroubleshootingErrorTypes(troubleshootingMarkdown: string): Set<string> {
+  const errorTypes = new Set<string>();
+  for (const line of troubleshootingMarkdown.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("|") || trimmed === TROUBLESHOOTING_HEADER || trimmed === TROUBLESHOOTING_SEPARATOR) continue;
+    const firstCell = trimmed.split("|")[1]?.trim();
+    if (firstCell) errorTypes.add(firstCell);
+  }
+  return errorTypes;
+}
+
+export interface ErrorTroubleshootingCrossCheck {
+  missingFromTroubleshooting: string[];
+  orphanedInTroubleshooting: string[];
+}
+
+/**
+ * Section 4<->5 cross-check (build brief Phase 8): every custom error type
+ * declared in the graph should have a matching troubleshooting row, and
+ * vice versa. Flags mismatches instead of silently dropping either side --
+ * these can drift apart across incremental regenerations (a node added
+ * without a following regen, a stale row left behind after code changed).
+ */
+export function crossCheckErrorsAndTroubleshooting(graph: DocGraph, troubleshootingMarkdown: string): ErrorTroubleshootingCrossCheck {
+  const errorTypesInGraph = new Set(graph.nodes.flatMap((n) => n.agentContract.errorModes.map((e) => e.errorType)));
+  const errorTypesInTable = parseTroubleshootingErrorTypes(troubleshootingMarkdown);
+  return {
+    missingFromTroubleshooting: [...errorTypesInGraph].filter((e) => !errorTypesInTable.has(e)),
+    orphanedInTroubleshooting: [...errorTypesInTable].filter((e) => !errorTypesInGraph.has(e)),
+  };
+}

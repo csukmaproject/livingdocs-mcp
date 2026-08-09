@@ -71,4 +71,6 @@ export interface DocGraph {
   lastScannedCommit?: string;
   /** sectionKey -> ISO date the section's rendered text last actually changed. Read by `livingdocs status`. */
   sectionSyncDates?: Record<string, string>;
+  /** errorType -> previously-generated suggested-resolution sentence, carried forward so unchanged error types don't get re-sent to the model every regen. */
+  errorResolutions?: Record<string, string>;
 }
