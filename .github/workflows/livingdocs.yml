@@ -1,0 +1,107 @@
+name: livingdocs
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          # Full history, not a shallow clone: livingdocs diffs since the
+          # commit its own graph.json was last generated from, which a
+          # shallow clone may not contain. (It falls back to a full scan
+          # if that commit truly isn't reachable, so this isn't required
+          # for correctness -- just avoids an unnecessary full re-scan.)
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Scan for stale docs
+        id: scan
+        run: |
+          {
+            echo "output<<LIVINGDOCS_EOF"
+            npx -y @csukmaproject/livingdocs-mcp livingdocs scan --repo .
+            echo "LIVINGDOCS_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Update docs
+        id: update
+        env:
+          # Optional: set this repo secret to also regenerate the
+          # LLM-heavy Core Features / Troubleshooting sections in CI.
+          # Unset is fine -- update gracefully skips just those two.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          {
+            echo "output<<LIVINGDOCS_EOF"
+            npx -y @csukmaproject/livingdocs-mcp livingdocs update --repo .
+            echo "LIVINGDOCS_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check for the auto-commit opt-in (livingdocs.config.json -> ci.autoCommit)
+        id: config
+        run: |
+          AUTO_COMMIT=$(node -e "
+            try {
+              const config = JSON.parse(require('fs').readFileSync('livingdocs.config.json', 'utf8'));
+              console.log(config.ci?.autoCommit === true);
+            } catch {
+              console.log(false);
+            }
+          ")
+          echo "autoCommit=$AUTO_COMMIT" >> "$GITHUB_OUTPUT"
+
+      # Opt-in only -- the default trust level (below) is PR-comment, never
+      # a direct commit (build brief Phase 11).
+      - name: Commit doc updates directly to the PR branch (opt-in)
+        if: steps.config.outputs.autoCommit == 'true'
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "livingdocs[bot]"
+            git config user.email "livingdocs-bot@users.noreply.github.com"
+            git add -A
+            git commit -m "docs: livingdocs auto-update"
+            git push
+          fi
+
+      - name: Comment on the PR with what changed (default trust level)
+        if: steps.config.outputs.autoCommit != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const scan = `${{ steps.scan.outputs.output }}`;
+            const update = `${{ steps.update.outputs.output }}`;
+            const body = [
+              "## 🤖 livingdocs",
+              "",
+              "Doc updates were generated in this CI run but **not committed** " +
+                "(default trust level -- opt in via `livingdocs.config.json`'s " +
+                "`ci.autoCommit` to have livingdocs push them directly instead).",
+              "",
+              "**Scan (`livingdocs scan`):**",
+              "```",
+              scan.trim() || "(no output)",
+              "```",
+              "",
+              "**Update (`livingdocs update`, written locally in this run):**",
+              "```",
+              update.trim() || "(no output)",
+              "```",
+            ].join("\n");
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });

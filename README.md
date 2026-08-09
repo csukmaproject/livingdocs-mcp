@@ -116,6 +116,22 @@ There's no MCP host to borrow a model from out here, so `update` and
 Troubleshooting sections: set `ANTHROPIC_API_KEY` in your environment, or
 they're skipped (the other sections still update normally).
 
+## CI
+
+[`.github/workflows/livingdocs.yml`](.github/workflows/livingdocs.yml)
+runs `livingdocs scan` and `livingdocs update` on every PR. The default
+trust level posts the results as a PR comment — **no direct commit**.
+Set `ci.autoCommit: true` in a `livingdocs.config.json` at your repo root
+to opt into having it push the update directly to the PR branch instead:
+
+```json
+{ "ci": { "autoCommit": true } }
+```
+
+Add an `ANTHROPIC_API_KEY` repo secret to also regenerate the LLM-heavy
+Core Features / Troubleshooting sections in CI — optional, everything
+else updates normally without it.
+
 ## License
 
 MIT — see `LICENSE`.

@@ -15,3 +15,4 @@ export * from "./sync.js";
 export * from "./bootstrap.js";
 export * from "./cross-node-synthesis.js";
 export * from "./documents.js";
+export * from "./config.js";
