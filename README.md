@@ -9,12 +9,22 @@ affects. Updates are append-only — every doc change and every revision
 row is traceable to the commit that caused it.
 
 Status: v0.1.0. Core extraction, revision history, the MCP server (5
-tools), and the CLI (4 commands) cover all six User Guide sections:
-System Overview and Getting Started are pure templating (zero LLM calls);
-Core Features and Troubleshooting are the first LLM-heavy rollups, routed
-through `llm-adapter.ts` with confidence tagged per field
-(`extracted`/`inferred`) and only regenerated for entities that actually
-changed. The PRD/SRS/business-guide rollups land in Phase 10. See
+tools), the CLI (5 commands: scan/update/generate/status/bootstrap), and
+every document type from docgen-plugin-plan.md's Section 7 table are
+implemented, all reusing the same doc graph:
+
+| Document | Reuses | LLM |
+|---|---|---|
+| User Guide (`generate user-guide`) | fixed 6-section skeleton | Sections 2-3 none, 4-5 batched per changed entity |
+| Agent Contract Reference | flat rollup of `agentContract` facets | none |
+| SRS | contract facets grouped by `@requirement` | none |
+| Technical Guide | narrative facets grouped by file | none (reuses already-generated narrative) |
+| Business Guide | Technical Guide's data, filtered to `@audience:business` | optional reading-level rewrite |
+| PRD | cross-node synthesis across each `@requirement`'s entities | required |
+
+Confidence is tagged per field (`extracted`/`inferred`), and LLM calls are
+always batched (one call per regeneration, not one per entity) and scoped
+to only the nodes that actually changed or need that specific rollup. See
 `docgen-plugin-plan.md` for the full architecture rationale.
 
 ## Install
@@ -83,6 +93,8 @@ The CLI binary is named `livingdocs` and ships in this same package:
 npx --package=@csukmaproject/livingdocs-mcp livingdocs scan
 npx --package=@csukmaproject/livingdocs-mcp livingdocs update
 npx --package=@csukmaproject/livingdocs-mcp livingdocs generate user-guide
+npx --package=@csukmaproject/livingdocs-mcp livingdocs generate srs
+npx --package=@csukmaproject/livingdocs-mcp livingdocs generate prd
 npx --package=@csukmaproject/livingdocs-mcp livingdocs status
 npx --package=@csukmaproject/livingdocs-mcp livingdocs bootstrap
 ```

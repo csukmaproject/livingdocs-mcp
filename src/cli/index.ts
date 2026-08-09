@@ -3,7 +3,19 @@ import { resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { Command } from "commander";
 import { ApiKeyProvider } from "../core/llm-adapter.js";
-import { countDocumentableEntities, loadGraph, loadSeed, runBootstrap, saveSeed, scanRepo, syncUserGuide, userGuidePath, SEED_QUESTIONS } from "../core/index.js";
+import {
+  countDocumentableEntities,
+  generateDocument,
+  loadGraph,
+  loadSeed,
+  runBootstrap,
+  saveSeed,
+  scanRepo,
+  syncUserGuide,
+  userGuidePath,
+  GENERATED_DOCUMENT_TYPES,
+  SEED_QUESTIONS,
+} from "../core/index.js";
 import type { BootstrapSeed, LlmAdapter, NodeChange } from "../core/index.js";
 
 const SECTION_KEYS = ["system-overview", "getting-started", "core-features", "troubleshooting"];
@@ -93,19 +105,19 @@ program
 
 program
   .command("generate")
-  .description("Force-generate one document type.")
-  .argument("<type>", 'document type to generate (only "user-guide" exists as of Phase 5)')
+  .description(`Force-generate one document type: user-guide, ${GENERATED_DOCUMENT_TYPES.join(", ")}.`)
+  .argument("<type>", "document type to generate")
   .option("-r, --repo <path>", "target repo path", ".")
   .action(async (type: string, opts: { repo: string }) => {
     const repoRoot = resolveRepoRoot(opts.repo);
-    if (type !== "user-guide") {
-      console.error(`Document type "${type}" isn't implemented yet -- only "user-guide" exists as of Phase 5.`);
+    if (["user-guide", "prd", "business-guide"].includes(type)) warnIfNoApiKey();
+    const result = await generateDocument(repoRoot, type, resolveLlmAdapter());
+    if (!result.ok) {
+      console.error(result.error);
       process.exitCode = 1;
       return;
     }
-    warnIfNoApiKey();
-    const result = await syncUserGuide(repoRoot, { force: true, llm: resolveLlmAdapter() });
-    console.log(`Generated ${userGuidePath(repoRoot)}`);
+    console.log(`Generated ${result.outputPath}`);
     printCrossCheck(result.crossCheck);
   });
 

@@ -13,3 +13,5 @@ export * from "./incremental-extract.js";
 export * from "./narrative-generator.js";
 export * from "./sync.js";
 export * from "./bootstrap.js";
+export * from "./cross-node-synthesis.js";
+export * from "./documents.js";

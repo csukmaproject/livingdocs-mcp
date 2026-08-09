@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { DocGraph } from "./types.js";
+import type { DocGraph, DocNode } from "./types.js";
 
 export interface PackageMeta {
   name: string;
@@ -225,4 +225,145 @@ export function crossCheckErrorsAndTroubleshooting(graph: DocGraph, troubleshoot
     missingFromTroubleshooting: [...errorTypesInGraph].filter((e) => !errorTypesInTable.has(e)),
     orphanedInTroubleshooting: [...errorTypesInTable].filter((e) => !errorTypesInGraph.has(e)),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 10: PRD / SRS / Technical Guide / Business Guide -- docgen-plugin
+// -plan.md Section 7's document-types table, reusing this same rollup
+// engine with different filters over the same doc graph, per Phase 10 of
+// the build brief.
+// ---------------------------------------------------------------------------
+
+function renderContractBlock(node: DocNode, heading: string): string {
+  const c = node.agentContract;
+  return [
+    `### ${heading}`,
+    "",
+    "```",
+    c.signature || "(no signature)",
+    "```",
+    "",
+    `- **Preconditions:** ${c.preconditions.join("; ") || "(none)"}`,
+    `- **Postconditions:** ${c.postconditions.join("; ") || "(none)"}`,
+    `- **Side effects:** ${c.sideEffects.join("; ") || "none"}`,
+    `- **Error modes:** ${c.errorModes.map((e) => `${e.errorType} when ${e.condition}`).join("; ") || "(none)"}`,
+    `- **Dependencies:** ${c.dependencies.join(", ") || "(none)"}`,
+  ].join("\n");
+}
+
+/** Agent Contract Reference -- flat, structured agent-contract facets for every entity. Mechanical, zero LLM. */
+export function generateAgentContractReference(graph: DocGraph): string {
+  const entityNodes = graph.nodes.filter((n) => n.entityType !== "module");
+  if (entityNodes.length === 0) return "_No documented entities yet._";
+  return entityNodes.map((node) => renderContractBlock(node, node.nodeId)).join("\n\n");
+}
+
+function requirementTagsOf(node: DocNode): string[] {
+  return node.tags.filter((t) => t.startsWith("requirement:")).map((t) => t.slice("requirement:".length));
+}
+
+/** SRS -- contract facets grouped by @requirement tag for traceability, with an "Unclassified" bucket. Mechanical, zero LLM. */
+export function generateSrs(graph: DocGraph): string {
+  const entityNodes = graph.nodes.filter((n) => n.entityType !== "module");
+  const byRequirement = new Map<string, DocNode[]>();
+  const unclassified: DocNode[] = [];
+
+  for (const node of entityNodes) {
+    const requirements = requirementTagsOf(node);
+    if (requirements.length === 0) {
+      unclassified.push(node);
+      continue;
+    }
+    for (const requirement of requirements) {
+      const list = byRequirement.get(requirement) ?? [];
+      list.push(node);
+      byRequirement.set(requirement, list);
+    }
+  }
+
+  const sections = [...byRequirement.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([requirement, nodes]) => [`## ${requirement}`, ...nodes.map((n) => renderContractBlock(n, n.entityName))].join("\n\n"));
+
+  if (unclassified.length > 0) {
+    sections.push(["## Unclassified", ...unclassified.map((n) => renderContractBlock(n, n.entityName))].join("\n\n"));
+  }
+
+  return sections.length > 0 ? sections.join("\n\n") : "_No documented entities yet._";
+}
+
+/** Technical Guide -- narrative facets grouped by file/module, for a developer audience. Mechanical rollup of already-generated content; no fresh LLM calls of its own. */
+export function generateTechnicalGuide(graph: DocGraph): string {
+  const byFile = new Map<string, DocNode[]>();
+  for (const node of graph.nodes) {
+    const list = byFile.get(node.filePath) ?? [];
+    list.push(node);
+    byFile.set(node.filePath, list);
+  }
+  if (byFile.size === 0) return "_No documented entities yet._";
+
+  const sections = [...byFile.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([filePath, nodes]) => {
+    const moduleNode = nodes.find((n) => n.entityType === "module");
+    const entityNodesInFile = nodes.filter((n) => n.entityType !== "module");
+    const lines = [`## ${filePath}`];
+    if (moduleNode?.humanNarrative.purpose) lines.push("", moduleNode.humanNarrative.purpose);
+    for (const node of entityNodesInFile) {
+      lines.push("", `### ${node.entityName}`, "", "```", node.agentContract.signature || "(no signature)", "```");
+      if (node.humanNarrative.purpose) lines.push("", node.humanNarrative.purpose);
+      if (node.humanNarrative.rationale) lines.push("", node.humanNarrative.rationale);
+    }
+    return lines.join("\n");
+  });
+
+  return sections.join("\n\n");
+}
+
+/** Entities eligible for the Business Guide: build brief Phase 10 -- "same rollup [as Technical Guide], filtered to @audience:business". */
+export function filterBusinessAudienceNodes(graph: DocGraph): DocNode[] {
+  return graph.nodes.filter((n) => n.entityType !== "module" && n.tags.includes("audience:business"));
+}
+
+export interface BusinessRewrite {
+  purpose: string;
+  rationale: string;
+}
+
+/** Business Guide -- @audience:business entities only, with an optional reading-level-adjusted rewrite layered over the technical narrative. */
+export function generateBusinessGuide(businessNodes: DocNode[], rewrites: Map<string, BusinessRewrite>): string {
+  if (businessNodes.length === 0) return "_No entities tagged `audience:business` yet._";
+  return businessNodes
+    .map((node) => {
+      const rewrite = rewrites.get(node.nodeId);
+      const lines = [`### ${node.entityName}`];
+      const purpose = rewrite?.purpose || node.humanNarrative.purpose;
+      const rationale = rewrite?.rationale || node.humanNarrative.rationale;
+      if (purpose) lines.push("", purpose);
+      if (rationale) lines.push("", rationale);
+      return lines.join("\n");
+    })
+    .join("\n\n");
+}
+
+export interface PrdRequirement {
+  requirementId: string;
+  title: string;
+  description: string;
+  acceptanceCriteria: string[];
+}
+
+/** PRD -- one entry per @requirement tag, synthesized (Phase 10: "the one place real synthesis happens, since a requirement spans multiple entities"). */
+export function renderPrd(requirements: PrdRequirement[]): string {
+  if (requirements.length === 0) return "_No `@requirement`-tagged entities yet._";
+  return requirements
+    .map((r) =>
+      [
+        `## ${r.requirementId}: ${r.title}`,
+        "",
+        r.description,
+        "",
+        "**Acceptance criteria:**",
+        ...(r.acceptanceCriteria.length > 0 ? r.acceptanceCriteria.map((c) => `- ${c}`) : ["- (none specified)"]),
+      ].join("\n"),
+    )
+    .join("\n\n");
 }

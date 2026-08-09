@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import {
+  generateDocument,
   loadGraph,
   parseDocumentRevisionRows,
   readUserGuide,
@@ -122,26 +123,19 @@ server.registerTool(
   "generate_rollup",
   {
     description:
-      'Force-generates one named document type from the current graph. Only "user-guide" is implemented so far (Phase 2/8 scope); other types land in Phase 10.',
+      "Force-generates one named document type from the current graph: user-guide, agent-contract-reference, srs, prd, technical-guide, or business-guide.",
     inputSchema: { repoRoot: repoRootSchema, type: z.string() },
   },
   async ({ repoRoot, type }) => {
-    if (type !== "user-guide") {
-      return {
-        isError: true,
-        content: [
-          { type: "text", text: `Document type "${type}" isn't implemented yet -- only "user-guide" exists as of Phase 5.` },
-        ],
-      };
+    const result = await generateDocument(repoRoot, type, samplingProvider);
+    if (!result.ok) {
+      return { isError: true, content: [{ type: "text", text: result.error }] };
     }
-
-    const result = await syncUserGuide(repoRoot, { force: true, llm: samplingProvider });
+    const hasCrossCheckIssues =
+      result.crossCheck && (result.crossCheck.missingFromTroubleshooting.length > 0 || result.crossCheck.orphanedInTroubleshooting.length > 0);
     return {
-      content: [{ type: "text", text: result.documentMarkdown }],
-      ...(result.crossCheck &&
-      (result.crossCheck.missingFromTroubleshooting.length > 0 || result.crossCheck.orphanedInTroubleshooting.length > 0)
-        ? { _meta: { crossCheck: result.crossCheck } }
-        : {}),
+      content: [{ type: "text", text: result.content }],
+      ...(hasCrossCheckIssues ? { _meta: { crossCheck: result.crossCheck } } : {}),
     };
   },
 );

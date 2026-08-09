@@ -81,8 +81,37 @@ describe("livingdocs CLI (built binary)", () => {
       expect(generate.stdout).toContain("Generated");
       expect(readFileSync(join(tmp, "USER_GUIDE.md"), "utf8")).toContain("documented-fixture");
 
-      const unknown = runCli(["generate", "prd", "--repo", tmp]);
+      const unknown = runCli(["generate", "changelog", "--repo", tmp]);
       expect(unknown.status).not.toBe(0);
+      expect(unknown.stderr).toContain("Unknown document type");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("generate <type> produces every Phase 10 document type from the same doc graph", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "livingdocs-cli-"));
+    try {
+      cpSync(FIXTURE_ROOT, tmp, { recursive: true });
+      initGitRepo(tmp);
+
+      const cases: Array<[string, string]> = [
+        ["agent-contract-reference", "AGENT_CONTRACTS.md"],
+        ["srs", "SRS.md"],
+        ["technical-guide", "TECHNICAL_GUIDE.md"],
+        ["business-guide", "BUSINESS_GUIDE.md"],
+      ];
+      for (const [type, filename] of cases) {
+        const result = runCli(["generate", type, "--repo", tmp]);
+        expect(result.status).toBe(0);
+        expect(existsSync(join(tmp, filename))).toBe(true);
+      }
+
+      // PRD needs cross-node synthesis -- fails clearly without an API key, rather than writing an empty file.
+      const prd = runCli(["generate", "prd", "--repo", tmp], { ...process.env, ANTHROPIC_API_KEY: "" });
+      expect(prd.status).not.toBe(0);
+      expect(prd.stderr).toContain("PRD generation needs cross-node synthesis");
+      expect(existsSync(join(tmp, "PRD.md"))).toBe(false);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
