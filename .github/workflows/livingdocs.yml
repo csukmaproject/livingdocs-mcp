@@ -26,12 +26,29 @@ jobs:
         with:
           node-version: 20
 
+      # This repo IS livingdocs-mcp's own source, so it builds locally
+      # rather than npx-fetching itself from npm -- both because that
+      # tests the PR's actual code instead of the last published version,
+      # and because `npx <pkg-name> <bin-name>` breaks when the package
+      # being installed shares its own directory's package.json name (a
+      # real bug found by this workflow's first live run: every arg after
+      # the package name gets passed to the WRONG bin instead of selecting
+      # a different one, even with --package= explicit). If you're copying
+      # this workflow into a DIFFERENT project to run livingdocs on THAT
+      # project instead, delete this step and replace every
+      # `node dist/cli/index.js` below with:
+      #   npx -y --package=@csukmaproject/livingdocs-mcp livingdocs
+      - name: Build livingdocs from source
+        run: |
+          npm ci
+          npm run build
+
       - name: Scan for stale docs
         id: scan
         run: |
           {
             echo "output<<LIVINGDOCS_EOF"
-            npx -y @csukmaproject/livingdocs-mcp livingdocs scan --repo .
+            node dist/cli/index.js scan --repo .
             echo "LIVINGDOCS_EOF"
           } >> "$GITHUB_OUTPUT"
 
@@ -45,7 +62,7 @@ jobs:
         run: |
           {
             echo "output<<LIVINGDOCS_EOF"
-            npx -y @csukmaproject/livingdocs-mcp livingdocs update --repo .
+            node dist/cli/index.js update --repo .
             echo "LIVINGDOCS_EOF"
           } >> "$GITHUB_OUTPUT"
 
