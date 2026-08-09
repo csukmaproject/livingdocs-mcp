@@ -132,6 +132,20 @@ Add an `ANTHROPIC_API_KEY` repo secret to also regenerate the LLM-heavy
 Core Features / Troubleshooting sections in CI — optional, everything
 else updates normally without it.
 
+## Development
+
+```bash
+npm install
+npm run build
+npm test
+npm run lint
+```
+
+Fixtures live in `test/fixtures/` (`documented`, `undocumented`) and are
+exercised by both the unit tests and the CLI integration tests, which
+spawn the actual built binary rather than only testing the underlying
+functions.
+
 ## License
 
 MIT — see `LICENSE`.
