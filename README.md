@@ -23,10 +23,19 @@ npm install @csukmaproject/livingdocs-mcp
 
 ## Use with an AI coding agent (MCP)
 
-| Host | Config file | Snippet |
+All hosts spawn the identical local process over stdio -- nothing to
+host, no account, no server to keep running. Pick your tool, add the one
+config line, and optionally copy the matching adapter file from
+[`/adapters`](adapters) into your project so the agent knows *when* to
+call `analyze_change` / `update_doc` / `generate_rollup` rather than
+hand-editing `USER_GUIDE.md`.
+
+| Host | Config file | Adapter template |
 |---|---|---|
-| Claude Code | `.mcp.json` (project) or `claude mcp add` | see below |
-| Codex CLI, Cursor, Windsurf | their respective MCP settings | coming in Phase 7 |
+| Claude Code | `.mcp.json` (project) or `claude mcp add` | [`CLAUDE.md.template`](adapters/CLAUDE.md.template) |
+| Codex CLI | `codex mcp add` or `~/.codex/config.toml` | [`AGENTS.md.template`](adapters/AGENTS.md.template) |
+| Cursor | `.cursor/mcp.json` | [`cursor-rules.template`](adapters/cursor-rules.template) |
+| Windsurf | its MCP settings (same `mcpServers` shape) | use the Claude Code snippet as a base |
 
 **Claude Code** — add to `.mcp.json` in your project root:
 
@@ -41,10 +50,28 @@ npm install @csukmaproject/livingdocs-mcp
 }
 ```
 
-This exposes five tools to the agent: `analyze_change`, `get_contract`,
-`update_doc`, `generate_rollup`, and `get_doc_history`. No install step,
-no server to keep running, no account — the agent spawns and talks to it
-over stdio for the duration of the session.
+**Codex CLI** — register directly from the terminal:
+
+```bash
+codex mcp add livingdocs -- npx -y @csukmaproject/livingdocs-mcp
+```
+
+**Cursor** — add to `.cursor/mcp.json` in your project root (same shape
+as Claude Code's):
+
+```json
+{
+  "mcpServers": {
+    "livingdocs": {
+      "command": "npx",
+      "args": ["-y", "@csukmaproject/livingdocs-mcp"]
+    }
+  }
+}
+```
+
+Every host exposes the same five tools: `analyze_change`, `get_contract`,
+`update_doc`, `generate_rollup`, and `get_doc_history`.
 
 ## Use from the terminal (CLI)
 
