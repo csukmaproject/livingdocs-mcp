@@ -132,6 +132,15 @@ Add an `ANTHROPIC_API_KEY` repo secret to also regenerate the LLM-heavy
 Core Features / Troubleshooting sections in CI — optional, everything
 else updates normally without it.
 
+That workflow builds livingdocs from source, since this repo IS
+livingdocs-mcp's own -- **if you're copying it into a different project**
+to run livingdocs on _that_ project, swap the "build" step for
+`npx -y --package=@csukmaproject/livingdocs-mcp livingdocs <command>`
+instead (plain `npx -y @csukmaproject/livingdocs-mcp livingdocs
+<command>`, without `--package=`, breaks: npx matches the `livingdocs-mcp`
+bin by package name and swallows every arg after it, including the
+`livingdocs` command word itself).
+
 ## Development
 
 ```bash
