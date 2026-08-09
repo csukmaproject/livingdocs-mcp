@@ -283,3 +283,61 @@ export function extractFile(filePath: string, repoRoot: string): DocNode[] {
 export function extractRepo(repoRoot: string): DocNode[] {
   return walkSourceFiles(repoRoot).flatMap((file) => extractFile(file, repoRoot));
 }
+
+export interface UndocumentedEntity {
+  filePath: string;
+  entityName: string;
+  entityType: EntityType;
+  signature: string;
+  /** Byte offset where a new annotation comment should be inserted (start of the `export`/declaration line). */
+  insertionIndex: number;
+}
+
+/**
+ * Every top-level declaration with NO preceding doc comment at all --
+ * the bootstrap pipeline's input (Phase 9). Deliberately does not
+ * consider whether a comment, if present, actually contains our known
+ * tags: that's a different, not-yet-needed distinction ("has a comment
+ * but it's not ours" vs "has no comment").
+ */
+export function listUndocumentedEntities(repoRoot: string): UndocumentedEntity[] {
+  const results: UndocumentedEntity[] = [];
+  for (const absPath of walkSourceFiles(repoRoot)) {
+    const { tree, source } = parseSourceFile(absPath);
+    const relativePath = relative(repoRoot, absPath);
+    const topLevel = tree.rootNode.children;
+
+    for (let i = 0; i < topLevel.length; i++) {
+      const child = topLevel[i];
+      if (!child) continue;
+      const declNode = resolveDeclaration(child);
+      if (!declNode) continue;
+      const entityType = DECLARATION_TYPES[declNode.type];
+      const entityName = findEntityName(declNode);
+      if (!entityType || !entityName) continue;
+
+      const preceding = topLevel[i - 1];
+      const hasDocComment = Boolean(preceding && preceding.type === "comment" && preceding.text.startsWith("/**"));
+      if (hasDocComment) continue;
+
+      results.push({
+        filePath: relativePath,
+        entityName,
+        entityType,
+        signature: extractSignature(declNode, source),
+        insertionIndex: child.startIndex,
+      });
+    }
+  }
+  return results;
+}
+
+/** Applies multiple comment insertions to one file's source, safely (in descending offset order so earlier insertions don't shift later ones). */
+export function insertAnnotationComments(source: string, insertions: Array<{ insertionIndex: number; commentBlock: string }>): string {
+  const sorted = [...insertions].sort((a, b) => b.insertionIndex - a.insertionIndex);
+  let result = source;
+  for (const { insertionIndex, commentBlock } of sorted) {
+    result = `${result.slice(0, insertionIndex)}${commentBlock}\n${result.slice(insertionIndex)}`;
+  }
+  return result;
+}

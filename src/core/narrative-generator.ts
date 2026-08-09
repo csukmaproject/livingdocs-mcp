@@ -76,7 +76,7 @@ function buildNarrativePrompt(targets: GenerationTarget[]): string {
   return `${instructions}\n\n${targets.map(formatEntityBlock).join("\n\n")}`;
 }
 
-function parseJsonArrayResponse(text: string): unknown[] {
+export function parseJsonArrayResponse(text: string): unknown[] {
   const cleaned = text
     .trim()
     .replace(/^```(?:json)?\s*/, "")

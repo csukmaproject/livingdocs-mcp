@@ -1,0 +1,8 @@
+{
+  "name": "undocumented-fixture",
+  "version": "1.0.0",
+  "description": "A tiny app with zero annotations, used to test livingdocs' bootstrap pipeline.",
+  "scripts": {
+    "start": "node src/index.ts"
+  }
+}

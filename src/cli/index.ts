@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { resolve } from "node:path";
+import { createInterface } from "node:readline/promises";
 import { Command } from "commander";
 import { ApiKeyProvider } from "../core/llm-adapter.js";
-import { countDocumentableEntities, loadGraph, scanRepo, syncUserGuide, userGuidePath } from "../core/index.js";
-import type { LlmAdapter, NodeChange } from "../core/index.js";
+import { countDocumentableEntities, loadGraph, loadSeed, runBootstrap, saveSeed, scanRepo, syncUserGuide, userGuidePath, SEED_QUESTIONS } from "../core/index.js";
+import type { BootstrapSeed, LlmAdapter, NodeChange } from "../core/index.js";
 
 const SECTION_KEYS = ["system-overview", "getting-started", "core-features", "troubleshooting"];
 
@@ -25,7 +26,7 @@ function printChanges(changes: NodeChange[]): void {
 function resolveLlmAdapter(): LlmAdapter | undefined {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return undefined;
-  return new ApiKeyProvider({ apiKey });
+  return new ApiKeyProvider({ apiKey, baseUrl: process.env.ANTHROPIC_BASE_URL });
 }
 
 function warnIfNoApiKey(): void {
@@ -128,6 +129,70 @@ program
     console.log("Last sync per section:");
     for (const key of SECTION_KEYS) {
       console.log(`  ${key}: ${graph.sectionSyncDates?.[key] ?? "never"}`);
+    }
+  });
+
+async function collectSeed(repoRoot: string, reset: boolean): Promise<BootstrapSeed | null> {
+  if (!reset) {
+    const existing = loadSeed(repoRoot);
+    if (existing) return existing;
+  }
+
+  if (!process.stdin.isTTY) {
+    console.log("(no TTY -- skipping the business-context questions; annotations will be inferred from code/test/git signals only)");
+    return null;
+  }
+
+  console.log("A few one-time questions to seed business rationale (never re-asked unless --reset-seed):\n");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const answers: string[] = [];
+  try {
+    for (const question of SEED_QUESTIONS) {
+      answers.push(await rl.question(`${question}\n> `));
+    }
+  } finally {
+    rl.close();
+  }
+
+  const seed: BootstrapSeed = { questions: [...SEED_QUESTIONS], answers, answeredAt: new Date().toISOString() };
+  saveSeed(repoRoot, seed);
+  return seed;
+}
+
+program
+  .command("bootstrap")
+  .description("Run the signal-source pipeline on an undocumented repo and propose annotations via a PR.")
+  .option("-r, --repo <path>", "target repo path", ".")
+  .option("--reset-seed", "re-ask the business-context questions even if already answered", false)
+  .action(async (opts: { repo: string; resetSeed: boolean }) => {
+    const repoRoot = resolveRepoRoot(opts.repo);
+    const llm = resolveLlmAdapter();
+    if (!llm) {
+      console.error("ANTHROPIC_API_KEY is required for bootstrap (no MCP host to borrow sampling from out here).");
+      process.exitCode = 1;
+      return;
+    }
+
+    const seed = await collectSeed(repoRoot, opts.resetSeed);
+    const result = await runBootstrap(repoRoot, { llm, seed });
+
+    if (result.filesChanged.length === 0) {
+      console.log("Nothing to bootstrap -- every documentable entity already has a doc comment.");
+      return;
+    }
+
+    console.log(`Coverage: ${result.coverageBefore}% -> ${result.coverageAfter}%`);
+    console.log(
+      `Proposed annotations for ${result.proposedEntities.length} entit${result.proposedEntities.length === 1 ? "y" : "ies"} across ${result.filesChanged.length} file(s), all marked INFERRED:`,
+    );
+    for (const key of result.proposedEntities) console.log(`  - ${key}`);
+    console.log(`\nCommitted to branch "${result.branchName}" (your checkout is back on the original branch).`);
+    if (result.prUrl) {
+      console.log(`Pull request opened: ${result.prUrl}`);
+    } else if (result.pushed) {
+      console.log("Branch pushed to origin -- open a PR yourself (gh not available/authenticated here).");
+    } else {
+      console.log(`No remote configured -- push it yourself: git push -u origin ${result.branchName}`);
     }
   });
 

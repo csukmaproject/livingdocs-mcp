@@ -84,10 +84,20 @@ npx --package=@csukmaproject/livingdocs-mcp livingdocs scan
 npx --package=@csukmaproject/livingdocs-mcp livingdocs update
 npx --package=@csukmaproject/livingdocs-mcp livingdocs generate user-guide
 npx --package=@csukmaproject/livingdocs-mcp livingdocs status
+npx --package=@csukmaproject/livingdocs-mcp livingdocs bootstrap
 ```
 
 Once installed as a project dependency, you can drop the `--package` and
 just run `livingdocs <command>`.
+
+`bootstrap` is for existing, undocumented repos: it runs a signal-source
+pipeline (code structure, tests, git co-change history, naming, then LLM
+synthesis) to propose annotations for every undocumented entity, asks a
+handful of one-time business-context questions on first run, and commits
+the proposal to a new branch (opening a PR if `origin` + an authenticated
+`gh` are available) rather than touching your checked-out branch. Every
+proposed line is marked `INFERRED` in the comment itself, so nothing it
+guesses can be mistaken for verified fact before you've reviewed it.
 
 There's no MCP host to borrow a model from out here, so `update` and
 `generate` fall back to a direct API key for the Core Features /

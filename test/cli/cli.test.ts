@@ -17,13 +17,13 @@ function initGitRepo(dir: string): void {
   execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: dir });
 }
 
-function runCli(args: string[]): { stdout: string; status: number } {
+function runCli(args: string[], env: Record<string, string | undefined> = process.env): { stdout: string; stderr: string; status: number } {
   try {
-    const stdout = execFileSync("node", [CLI_PATH, ...args], { encoding: "utf8" });
-    return { stdout, status: 0 };
+    const stdout = execFileSync("node", [CLI_PATH, ...args], { encoding: "utf8", env });
+    return { stdout, stderr: "", status: 0 };
   } catch (error) {
-    const err = error as { stdout?: string; status?: number };
-    return { stdout: err.stdout ?? "", status: err.status ?? 1 };
+    const err = error as { stdout?: string; stderr?: string; status?: number };
+    return { stdout: err.stdout ?? "", stderr: err.stderr ?? "", status: err.status ?? 1 };
   }
 }
 
@@ -109,6 +109,20 @@ describe("livingdocs CLI (built binary)", () => {
       // correctly never ran -- still "never" here, not a bug.
       expect(after.stdout).toContain("core-features: never");
       expect(after.stdout).toContain("troubleshooting: never");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("bootstrap requires an API key (no MCP host to borrow sampling from out here)", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "livingdocs-cli-"));
+    try {
+      cpSync(fileURLToPath(new URL("../fixtures/undocumented", import.meta.url)), tmp, { recursive: true });
+      initGitRepo(tmp);
+
+      const result = runCli(["bootstrap", "--repo", tmp], { ...process.env, ANTHROPIC_API_KEY: "" });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("ANTHROPIC_API_KEY is required");
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

@@ -12,3 +12,4 @@ export * from "./git.js";
 export * from "./incremental-extract.js";
 export * from "./narrative-generator.js";
 export * from "./sync.js";
+export * from "./bootstrap.js";
