@@ -8,10 +8,33 @@ regeneration only ever touches the sections a real change actually
 affects. Updates are append-only — every doc change and every revision
 row is traceable to the commit that caused it.
 
-Status: v0.1.0. Core extraction, revision history, the MCP server (5
-tools), the CLI (5 commands: scan/update/generate/status/bootstrap), and
-every document type from docgen-plugin-plan.md's Section 7 table are
-implemented, all reusing the same doc graph:
+**v1.0.0.** Every document type in `docgen-plugin-plan.md`'s Section 7
+table generates from the same doc graph, all the way from mechanical
+extraction through the bootstrap pipeline and CI integration. See
+[`CHANGELOG.md`](CHANGELOG.md) for what changed since `0.1.0`, and
+`docgen-plugin-plan.md` for the full architecture rationale.
+
+## Quickstart
+
+```bash
+# 1. In an already-annotated (or freshly bootstrapped) repo:
+npx --package=@csukmaproject/livingdocs-mcp livingdocs update
+
+# 2. Or hand it to an AI coding agent instead of running the CLI yourself --
+#    add to .mcp.json (Claude Code) or the equivalent for your host:
+```
+```json
+{ "mcpServers": { "livingdocs": { "command": "npx", "args": ["-y", "@csukmaproject/livingdocs-mcp"] } } }
+```
+```bash
+# 3. Existing, undocumented repo? Bootstrap it first:
+npx --package=@csukmaproject/livingdocs-mcp livingdocs bootstrap
+```
+
+This exposes six document types (`generate <type>`, or the MCP
+`generate_rollup` tool): the flagship User Guide, Agent Contract
+Reference, SRS, PRD, Technical Guide, and Business Guide, all reusing the
+same doc graph:
 
 | Document | Reuses | LLM |
 |---|---|---|
@@ -24,8 +47,7 @@ implemented, all reusing the same doc graph:
 
 Confidence is tagged per field (`extracted`/`inferred`), and LLM calls are
 always batched (one call per regeneration, not one per entity) and scoped
-to only the nodes that actually changed or need that specific rollup. See
-`docgen-plugin-plan.md` for the full architecture rationale.
+to only the nodes that actually changed or need that specific rollup.
 
 ## Install
 
@@ -150,10 +172,11 @@ npm test
 npm run lint
 ```
 
-Fixtures live in `test/fixtures/` (`documented`, `undocumented`) and are
-exercised by both the unit tests and the CLI integration tests, which
-spawn the actual built binary rather than only testing the underlying
-functions.
+Fixtures live in `test/fixtures/` (`documented`, `undocumented`,
+`greenfield`) and are exercised by both the unit tests and the CLI
+integration tests, which spawn the actual built binary rather than only
+testing the underlying functions. `.github/workflows/ci.yml` runs the
+full suite on every push/PR.
 
 ## License
 
