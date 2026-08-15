@@ -1,8 +1,16 @@
+/**
+ * @purpose Renders the doc graph into human-facing document rollups (User Guide sections, Agent Contract Reference, SRS, Technical Guide, Business Guide, PRD) via pure, mechanical templating over already-extracted graph data.
+ * @audience technical
+ */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DocGraph, DocNode } from "./types.js";
 
+/**
+ * @purpose Shape of the subset of package.json fields the rollup engine reads to render install/usage docs.
+ * @audience technical
+ */
 export interface PackageMeta {
   name: string;
   description?: string;
@@ -11,13 +19,25 @@ export interface PackageMeta {
   scripts?: Record<string, string>;
 }
 
+/**
+ * @purpose Loads and parses a repo's package.json so its metadata can feed the doc rollups.
+ * @contract pre: repoRoot contains a readable, valid-JSON package.json.
+ *   post: returns the parsed package.json as PackageMeta.
+ *   throws: Error when the file does not exist or is unreadable.
+ *   throws: SyntaxError when the file's contents are not valid JSON.
+ *   side-effects: reads a file from disk.
+ * @audience technical
+ */
 export function readPackageMeta(repoRoot: string): PackageMeta {
   return JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as PackageMeta;
 }
 
 /**
- * User guide Section 2 (System Overview) — pure templating over already
- * -extracted @purpose text and package metadata. Zero LLM calls.
+ * @purpose Renders User Guide Section 2 (System Overview): package name/description, per-module purpose summaries, and a documented-entity count. Pure templating over already-extracted @purpose text and package metadata; zero LLM calls.
+ * @contract pre: none.
+ *   post: returns markdown text summarizing the graph's modules and package metadata.
+ *   side-effects: none.
+ * @audience technical
  */
 export function generateSystemOverview(graph: DocGraph, pkg: PackageMeta): string {
   const lines: string[] = [];
@@ -41,8 +61,11 @@ export function generateSystemOverview(graph: DocGraph, pkg: PackageMeta): strin
 }
 
 /**
- * User guide Section 3 (Getting Started) — pure templating over
- * package.json (install command, bin entries, scripts). Zero LLM calls.
+ * @purpose Renders User Guide Section 3 (Getting Started): install command, bin entries, and npm scripts, sourced entirely from package.json. Zero LLM calls.
+ * @contract pre: none.
+ *   post: returns markdown text with an install snippet plus bin/script listings when present.
+ *   side-effects: none.
+ * @audience technical
  */
 export function generateGettingStarted(pkg: PackageMeta): string {
   const lines: string[] = ["Install:", "", "```bash", `npm install ${pkg.name}`, "```"];
@@ -66,23 +89,38 @@ export function generateGettingStarted(pkg: PackageMeta): string {
 }
 
 /**
- * Loads the User Guide skeleton shipped alongside this module. Resolved
- * relative to this file (not process.cwd()) so it works the same whether
- * running from /src (dev) or the built /dist (published package) --
- * tsup's onSuccess hook copies src/templates to dist/templates so the two
- * stay siblings of core/ in both layouts.
+ * @purpose Loads the User Guide skeleton template shipped alongside this module. Resolved relative to this file (not process.cwd()) so it works the same whether running from /src (dev) or the built /dist (published package) -- tsup's onSuccess hook copies src/templates to dist/templates so the two stay siblings of core/ in both layouts.
+ * @contract pre: templates/user-guide-template.md exists next to this module.
+ *   post: returns the raw template file contents.
+ *   throws: Error when the template file is missing or unreadable.
+ *   side-effects: reads a file from disk.
+ * @audience technical
  */
 export function loadUserGuideTemplate(): string {
   const templatePath = fileURLToPath(new URL("../templates/user-guide-template.md", import.meta.url));
   return readFileSync(templatePath, "utf8");
 }
 
+/**
+ * @purpose Produces the initial User Guide document for a project by substituting the project name into the template's placeholder tokens.
+ * @contract pre: none.
+ *   post: returns the template text with every `{{project_name}}` token replaced by pkg.name.
+ *   side-effects: reads the template file from disk (via loadUserGuideTemplate).
+ * @audience technical
+ */
 export function seedUserGuide(pkg: PackageMeta): string {
   return loadUserGuideTemplate().replace(/\{\{project_name\}\}/g, pkg.name);
 }
 
 const SECTION_MARKER_PREFIX = "<!-- livingdocs:section ";
 
+/**
+ * @purpose Locates a named section's heading line and the start of the next section within a rendered markdown document, using the `<!-- livingdocs:section KEY -->` marker convention.
+ * @contract pre: none.
+ *   post: returns the heading line index and the index where the next section marker begins (or the document's length when there is no next marker), or null when the marker is absent or not immediately followed by a heading line.
+ *   side-effects: none.
+ * @audience technical
+ */
 function findSectionBounds(
   lines: string[],
   sectionKey: string,
@@ -97,7 +135,13 @@ function findSectionBounds(
   return { headingIndex, nextMarkerIndex };
 }
 
-/** Reads a section's rendered body (between its heading and the next marker), trimmed. */
+/**
+ * @purpose Extracts a section's rendered body (the text between its heading and the next section marker) so callers can inspect current content, e.g. before deciding whether to regenerate it.
+ * @contract pre: none.
+ *   post: returns the trimmed body text between the section's heading and the next marker, or "" when the section marker is not found.
+ *   side-effects: none.
+ * @audience technical
+ */
 export function readSectionContent(documentMarkdown: string, sectionKey: string): string {
   const lines = documentMarkdown.split("\n");
   const bounds = findSectionBounds(lines, sectionKey);
@@ -108,7 +152,14 @@ export function readSectionContent(documentMarkdown: string, sectionKey: string)
     .trim();
 }
 
-/** Replaces a section's body content, leaving every other section and the heading itself untouched. */
+/**
+ * @purpose Rewrites a single named section's body in a rendered markdown document while leaving every other section and the heading itself untouched.
+ * @contract pre: documentMarkdown contains a `<!-- livingdocs:section sectionKey -->` marker immediately followed by a heading line.
+ *   post: returns the document with the section's body replaced by the trimmed content (or a single blank line when content is empty).
+ *   throws: Error when no matching section marker is found in the document.
+ *   side-effects: none.
+ * @audience technical
+ */
 export function replaceSectionContent(documentMarkdown: string, sectionKey: string, content: string): string {
   const lines = documentMarkdown.split("\n");
   const bounds = findSectionBounds(lines, sectionKey);
@@ -122,10 +173,11 @@ export function replaceSectionContent(documentMarkdown: string, sectionKey: stri
 }
 
 /**
- * User guide Section 4 (Core Features) -- one subsection per documented
- * entity. Signature/purpose/error-modes are extracted (mechanical);
- * rationale/example/gotchas are filled in by narrative-generator.ts when
- * an LLM adapter is available, and left blank otherwise.
+ * @purpose Renders User Guide Section 4 (Core Features): one subsection per documented entity, combining the mechanically-extracted signature with whatever narrative (purpose/rationale/example/gotchas) has been generated so far by narrative-generator.ts.
+ * @contract pre: none.
+ *   post: returns markdown text, or a placeholder string when the graph has no non-module entities.
+ *   side-effects: none.
+ * @audience technical
  */
 export function generateCoreFeatures(graph: DocGraph): string {
   const entityNodes = graph.nodes.filter((n) => n.entityType !== "module");
@@ -146,7 +198,13 @@ export function generateCoreFeatures(graph: DocGraph): string {
     .join("\n\n");
 }
 
-/** Every distinct error type declared across the graph's nodes, each with the conditions that throw it (for prompting/context). */
+/**
+ * @purpose Groups every distinct error type declared across the graph's nodes with the conditions under which each is thrown, for use as prompting context by the narrative generator.
+ * @contract pre: none.
+ *   post: returns a Map from errorType to the list of conditions (or a fallback "thrown by <entity>" string) collected across all nodes that declare it.
+ *   side-effects: none.
+ * @audience technical
+ */
 export function collectErrorContexts(graph: DocGraph): Map<string, string[]> {
   const contexts = new Map<string, string[]>();
   for (const node of graph.nodes) {
@@ -163,10 +221,11 @@ const TROUBLESHOOTING_HEADER = "| Error | Thrown by | When | Suggested resolutio
 const TROUBLESHOOTING_SEPARATOR = "| --- | --- | --- | --- |";
 
 /**
- * User guide Section 5 (Troubleshooting) -- one row per distinct error
- * type. `resolutions` maps errorType -> a suggested-fix sentence; entries
- * with no resolution yet render with a placeholder rather than a blank
- * cell, so a missing generation is visible instead of silently blank.
+ * @purpose Renders User Guide Section 5 (Troubleshooting): one table row per distinct error type, cross-referencing which entities throw it, under what conditions, and its suggested resolution. `resolutions` maps errorType -> a suggested-fix sentence.
+ * @contract pre: none.
+ *   post: returns a markdown table, or a placeholder string when the graph declares no error modes. Rows with no resolution yet render with an explicit "_(not yet generated)_" placeholder rather than a blank cell, so a missing generation stays visible.
+ *   side-effects: none.
+ * @audience technical
  */
 export function generateTroubleshooting(graph: DocGraph, resolutions: Map<string, string>): string {
   const throwers = new Map<string, Set<string>>();
@@ -195,6 +254,13 @@ export function generateTroubleshooting(graph: DocGraph, resolutions: Map<string
   return [TROUBLESHOOTING_HEADER, TROUBLESHOOTING_SEPARATOR, ...rows].join("\n");
 }
 
+/**
+ * @purpose Recovers the set of error types already listed in a rendered Troubleshooting table, by reading the first cell of each data row.
+ * @contract pre: none.
+ *   post: returns the set of distinct error-type strings found in the table's first column, skipping the header and separator rows.
+ *   side-effects: none.
+ * @audience technical
+ */
 function parseTroubleshootingErrorTypes(troubleshootingMarkdown: string): Set<string> {
   const errorTypes = new Set<string>();
   for (const line of troubleshootingMarkdown.split("\n")) {
@@ -206,17 +272,21 @@ function parseTroubleshootingErrorTypes(troubleshootingMarkdown: string): Set<st
   return errorTypes;
 }
 
+/**
+ * @purpose Result shape for crossCheckErrorsAndTroubleshooting: the error types present on one side but missing from the other.
+ * @audience technical
+ */
 export interface ErrorTroubleshootingCrossCheck {
   missingFromTroubleshooting: string[];
   orphanedInTroubleshooting: string[];
 }
 
 /**
- * Section 4<->5 cross-check (build brief Phase 8): every custom error type
- * declared in the graph should have a matching troubleshooting row, and
- * vice versa. Flags mismatches instead of silently dropping either side --
- * these can drift apart across incremental regenerations (a node added
- * without a following regen, a stale row left behind after code changed).
+ * @purpose Detects drift between the error types declared in the doc graph and the rows actually present in a rendered Troubleshooting table (build brief Phase 8), since the two can fall out of sync across incremental regenerations (a node added without a following regen, a stale row left behind after code changed).
+ * @contract pre: none.
+ *   post: returns the error types declared in the graph but absent from the table, and the error types present in the table but no longer declared in the graph.
+ *   side-effects: none.
+ * @audience technical
  */
 export function crossCheckErrorsAndTroubleshooting(graph: DocGraph, troubleshootingMarkdown: string): ErrorTroubleshootingCrossCheck {
   const errorTypesInGraph = new Set(graph.nodes.flatMap((n) => n.agentContract.errorModes.map((e) => e.errorType)));
@@ -234,6 +304,13 @@ export function crossCheckErrorsAndTroubleshooting(graph: DocGraph, troubleshoot
 // the build brief.
 // ---------------------------------------------------------------------------
 
+/**
+ * @purpose Renders one entity's agent-contract facets (signature, preconditions, postconditions, side effects, error modes, dependencies) as a markdown block under a given heading, shared by the Agent Contract Reference and SRS rollups.
+ * @contract pre: none.
+ *   post: returns markdown text; any facet with no entries renders as "(none)" (or "none" for side effects) rather than an empty line.
+ *   side-effects: none.
+ * @audience technical
+ */
 function renderContractBlock(node: DocNode, heading: string): string {
   const c = node.agentContract;
   return [
@@ -251,18 +328,37 @@ function renderContractBlock(node: DocNode, heading: string): string {
   ].join("\n");
 }
 
-/** Agent Contract Reference -- flat, structured agent-contract facets for every entity. Mechanical, zero LLM. */
+/**
+ * @purpose Renders the Agent Contract Reference document: flat, structured agent-contract facets for every documented entity, keyed by nodeId. Mechanical, zero LLM.
+ * @contract pre: none.
+ *   post: returns markdown text, or a placeholder string when the graph has no non-module entities.
+ *   side-effects: none.
+ * @audience technical
+ */
 export function generateAgentContractReference(graph: DocGraph): string {
   const entityNodes = graph.nodes.filter((n) => n.entityType !== "module");
   if (entityNodes.length === 0) return "_No documented entities yet._";
   return entityNodes.map((node) => renderContractBlock(node, node.nodeId)).join("\n\n");
 }
 
+/**
+ * @purpose Extracts a node's `requirement:*` tags, stripped of the `requirement:` prefix, for grouping entities by requirement in the SRS.
+ * @contract pre: none.
+ *   post: returns the list of requirement IDs found in node.tags (empty when none are present).
+ *   side-effects: none.
+ * @audience technical
+ */
 function requirementTagsOf(node: DocNode): string[] {
   return node.tags.filter((t) => t.startsWith("requirement:")).map((t) => t.slice("requirement:".length));
 }
 
-/** SRS -- contract facets grouped by @requirement tag for traceability, with an "Unclassified" bucket. Mechanical, zero LLM. */
+/**
+ * @purpose Renders the SRS document: contract facets grouped by `@requirement` tag for traceability, with entities lacking any requirement tag collected into an "Unclassified" bucket. Mechanical, zero LLM.
+ * @contract pre: none.
+ *   post: returns markdown text with one section per requirement (sorted) plus an optional Unclassified section, or a placeholder string when the graph has no entities.
+ *   side-effects: none.
+ * @audience technical
+ */
 export function generateSrs(graph: DocGraph): string {
   const entityNodes = graph.nodes.filter((n) => n.entityType !== "module");
   const byRequirement = new Map<string, DocNode[]>();
@@ -292,7 +388,13 @@ export function generateSrs(graph: DocGraph): string {
   return sections.length > 0 ? sections.join("\n\n") : "_No documented entities yet._";
 }
 
-/** Technical Guide -- narrative facets grouped by file/module, for a developer audience. Mechanical rollup of already-generated content; no fresh LLM calls of its own. */
+/**
+ * @purpose Renders the Technical Guide document: narrative facets grouped by source file/module, for a developer audience. Mechanical rollup of already-generated content; no fresh LLM calls of its own.
+ * @contract pre: none.
+ *   post: returns markdown text with one section per file (sorted by path), or a placeholder string when the graph has no nodes.
+ *   side-effects: none.
+ * @audience technical
+ */
 export function generateTechnicalGuide(graph: DocGraph): string {
   const byFile = new Map<string, DocNode[]>();
   for (const node of graph.nodes) {
@@ -318,17 +420,33 @@ export function generateTechnicalGuide(graph: DocGraph): string {
   return sections.join("\n\n");
 }
 
-/** Entities eligible for the Business Guide: build brief Phase 10 -- "same rollup [as Technical Guide], filtered to @audience:business". */
+/**
+ * @purpose Selects the entities eligible for the Business Guide: non-module nodes explicitly tagged `audience:business` (build brief Phase 10 -- "same rollup [as Technical Guide], filtered to @audience:business").
+ * @contract pre: none.
+ *   post: returns the filtered list of DocNodes.
+ *   side-effects: none.
+ * @audience technical
+ */
 export function filterBusinessAudienceNodes(graph: DocGraph): DocNode[] {
   return graph.nodes.filter((n) => n.entityType !== "module" && n.tags.includes("audience:business"));
 }
 
+/**
+ * @purpose Shape of an optional reading-level-adjusted rewrite of an entity's purpose/rationale, layered over its technical narrative for the Business Guide.
+ * @audience technical
+ */
 export interface BusinessRewrite {
   purpose: string;
   rationale: string;
 }
 
-/** Business Guide -- @audience:business entities only, with an optional reading-level-adjusted rewrite layered over the technical narrative. */
+/**
+ * @purpose Renders the Business Guide document: `audience:business`-tagged entities only, preferring a business-rewritten purpose/rationale over the technical narrative when one is available.
+ * @contract pre: none.
+ *   post: returns markdown text, or a placeholder string when businessNodes is empty.
+ *   side-effects: none.
+ * @audience technical
+ */
 export function generateBusinessGuide(businessNodes: DocNode[], rewrites: Map<string, BusinessRewrite>): string {
   if (businessNodes.length === 0) return "_No entities tagged `audience:business` yet._";
   return businessNodes
@@ -344,6 +462,10 @@ export function generateBusinessGuide(businessNodes: DocNode[], rewrites: Map<st
     .join("\n\n");
 }
 
+/**
+ * @purpose Shape of a single synthesized PRD entry: one requirement's title, narrative description, and acceptance criteria.
+ * @audience technical
+ */
 export interface PrdRequirement {
   requirementId: string;
   title: string;
@@ -351,7 +473,13 @@ export interface PrdRequirement {
   acceptanceCriteria: string[];
 }
 
-/** PRD -- one entry per @requirement tag, synthesized (Phase 10: "the one place real synthesis happens, since a requirement spans multiple entities"). */
+/**
+ * @purpose Renders the PRD document: one entry per `@requirement` tag, synthesized across all entities that share it (Phase 10: "the one place real synthesis happens, since a requirement spans multiple entities").
+ * @contract pre: none.
+ *   post: returns markdown text, or a placeholder string when requirements is empty. Acceptance criteria render as a bullet list, or a "(none specified)" placeholder when empty.
+ *   side-effects: none.
+ * @audience technical
+ */
 export function renderPrd(requirements: PrdRequirement[]): string {
   if (requirements.length === 0) return "_No `@requirement`-tagged entities yet._";
   return requirements

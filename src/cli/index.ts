@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+/**
+ * @purpose CLI entry point for livingdocs-mcp: exposes the scan, update, generate, status, and bootstrap commands (via commander) so the doc-sync pipeline can run outside of an MCP host, falling back to a direct Anthropic API key for LLM calls.
+ * @audience technical
+ */
 import { resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { Command } from "commander";
@@ -20,10 +24,23 @@ import type { BootstrapSeed, LlmAdapter, NodeChange } from "../core/index.js";
 
 const SECTION_KEYS = ["system-overview", "getting-started", "core-features", "troubleshooting"];
 
+/**
+ * @purpose Normalizes the --repo CLI option into an absolute path so every downstream call works against a consistent repo root.
+ * @contract pre: repoOption is a path string (relative or absolute).
+ *   post: returns the absolute path resolved from repoOption.
+ *   side-effects: none.
+ * @audience technical
+ */
 function resolveRepoRoot(repoOption: string): string {
   return resolve(repoOption);
 }
 
+/**
+ * @purpose Prints one human-readable line per node change (classification, nodeId, reason) for CLI output.
+ * @contract post: writes one formatted line per change to stdout; returns nothing.
+ *   side-effects: writes to stdout via console.log.
+ * @audience technical
+ */
 function printChanges(changes: NodeChange[]): void {
   for (const change of changes) {
     console.log(`  [${change.classification}] ${change.nodeId} -- ${change.reason}`);
@@ -31,9 +48,10 @@ function printChanges(changes: NodeChange[]): void {
 }
 
 /**
- * No MCP host to borrow sampling from out here, so the CLI/CI path falls
- * back to a direct API key (build brief Phase 5) -- and simply skips the
- * LLM-heavy sections 4-5 when none is configured, rather than failing.
+ * @purpose Builds a direct-API-key LLM adapter for the CLI/CI path, since there's no MCP host out here to borrow sampling from.
+ * @contract post: returns an ApiKeyProvider configured from ANTHROPIC_API_KEY/ANTHROPIC_BASE_URL, or undefined when no API key is set (callers then skip the LLM-heavy sections instead of failing).
+ *   side-effects: none.
+ * @audience technical
  */
 function resolveLlmAdapter(): LlmAdapter | undefined {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -41,6 +59,12 @@ function resolveLlmAdapter(): LlmAdapter | undefined {
   return new ApiKeyProvider({ apiKey, baseUrl: process.env.ANTHROPIC_BASE_URL });
 }
 
+/**
+ * @purpose Warns the user on stdout when no Anthropic API key is configured, since LLM-heavy regeneration will be skipped.
+ * @contract post: logs a warning message when ANTHROPIC_API_KEY is unset; does nothing otherwise.
+ *   side-effects: writes to stdout via console.log when no API key is set.
+ * @audience technical
+ */
 function warnIfNoApiKey(): void {
   if (!process.env.ANTHROPIC_API_KEY) {
     console.log("(no ANTHROPIC_API_KEY set -- skipping Core Features / Troubleshooting regeneration)");
@@ -68,6 +92,13 @@ program
     printChanges(meaningful);
   });
 
+/**
+ * @purpose Prints warnings when thrown error types and the troubleshooting doc's rows have drifted out of sync in either direction.
+ * @contract pre: crossCheck may be undefined, in which case this is a no-op.
+ *   post: logs one warning line per error type missing a troubleshooting row and per troubleshooting row with no matching error.
+ *   side-effects: writes to stdout via console.log.
+ * @audience technical
+ */
 function printCrossCheck(crossCheck: { missingFromTroubleshooting: string[]; orphanedInTroubleshooting: string[] } | undefined): void {
   if (!crossCheck) return;
   for (const errorType of crossCheck.missingFromTroubleshooting) {
@@ -144,6 +175,13 @@ program
     }
   });
 
+/**
+ * @purpose Loads a previously saved bootstrap seed, or, interactively on a TTY, prompts once for the business-context answers used to seed generated documentation.
+ * @contract pre: none -- works whether or not a seed already exists.
+ *   post: returns the existing seed unless reset is true; returns null when stdin isn't a TTY (no prompting); otherwise asks each SEED_QUESTIONS entry, persists the answers via saveSeed, and returns the new seed.
+ *   side-effects: reads from stdin and writes prompts/messages to stdout when run interactively; persists the seed to disk via saveSeed.
+ * @audience technical
+ */
 async function collectSeed(repoRoot: string, reset: boolean): Promise<BootstrapSeed | null> {
   if (!reset) {
     const existing = loadSeed(repoRoot);

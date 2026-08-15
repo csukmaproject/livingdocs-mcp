@@ -1,3 +1,7 @@
+/**
+ * @purpose Parses TypeScript/JavaScript source files with tree-sitter to find top-level declarations and their attached JSDoc-style annotation comments, turning the frozen @purpose/@contract/@audience tag schema into structured DocNode records for the rest of the pipeline.
+ * @audience technical
+ */
 import { extname, join, relative } from "node:path";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import Parser from "tree-sitter";
@@ -19,10 +23,22 @@ const DECLARATION_TYPES: Record<string, EntityType> = {
 const BODY_NODE_TYPES = new Set(["statement_block", "class_body", "interface_body", "object_type"]);
 
 const KNOWN_TAGS = ["purpose", "requirement", "contract", "audience"] as const;
+/**
+ * @purpose Narrows the recognized annotation tag names to a union type so tag lookups elsewhere are type-checked against KNOWN_TAGS instead of arbitrary strings.
+ * @audience technical
+ */
 type KnownTag = (typeof KNOWN_TAGS)[number];
 
 const CONTRACT_CLAUSES = ["pre", "post", "throws", "side-effects", "deps"] as const;
 
+/**
+ * @purpose Recursively collects every source file under a directory that the extractor knows how to parse, skipping build/vendor/vcs folders.
+ * @contract pre: rootDir exists and is readable.
+ *   post: returns the absolute paths of all files under rootDir (recursively) whose extension is in SUPPORTED_EXTENSIONS, excluding IGNORED_DIRS subtrees.
+ *   throws: Error when rootDir does not exist or a subdirectory is not readable (propagated from readdirSync/statSync).
+ *   side-effects: none.
+ * @audience technical
+ */
 export function walkSourceFiles(rootDir: string): string[] {
   const results: string[] = [];
   const stack: string[] = [rootDir];
@@ -43,6 +59,12 @@ export function walkSourceFiles(rootDir: string): string[] {
   return results;
 }
 
+/**
+ * @purpose Picks the tree-sitter grammar to parse a file with, based on its extension.
+ * @contract post: returns the TSX grammar for .tsx, the TypeScript grammar for .ts, and the JavaScript grammar for anything else (.js/.jsx).
+ *   side-effects: none.
+ * @audience technical
+ */
 function languageFor(filePath: string) {
   const ext = extname(filePath);
   if (ext === ".tsx") return TypeScriptLanguages.tsx;
@@ -50,6 +72,13 @@ function languageFor(filePath: string) {
   return JavaScriptLanguage;
 }
 
+/**
+ * @purpose Strips block-comment decoration (leading slash-star-star, trailing star-slash, per-line leading asterisks) from a raw comment's text so only the annotation content remains.
+ * @contract pre: raw is the full text of a comment node, including its delimiters.
+ *   post: returns the de-commented, trimmed body text.
+ *   side-effects: none.
+ * @audience technical
+ */
 function cleanCommentText(raw: string): string {
   return raw
     .replace(/^\/\*\*?/, "")
@@ -60,6 +89,13 @@ function cleanCommentText(raw: string): string {
     .trim();
 }
 
+/**
+ * @purpose Splits a cleaned annotation comment body into its top-level @purpose/@requirement/@contract/@audience sections, keyed by tag name.
+ * @contract pre: cleaned is the de-commented text produced by cleanCommentText.
+ *   post: returns a map from each known tag found to its raw text; a tag repeated more than once has its occurrences joined with newlines; tags absent from the comment are omitted from the result.
+ *   side-effects: none.
+ * @audience technical
+ */
 function splitTopLevelTags(cleaned: string): Partial<Record<KnownTag, string>> {
   const tagAlternation = KNOWN_TAGS.join("|");
   const pattern = new RegExp(`@(${tagAlternation})\\b([\\s\\S]*?)(?=@(?:${tagAlternation})\\b|$)`, "g");
@@ -72,6 +108,10 @@ function splitTopLevelTags(cleaned: string): Partial<Record<KnownTag, string>> {
   return result;
 }
 
+/**
+ * @purpose Structured form of an @contract tag's clauses, split out by clause type (pre/post/throws/side-effects/deps) for consumption by buildAgentContract.
+ * @audience technical
+ */
 interface ParsedContract {
   preconditions: string[];
   postconditions: string[];
@@ -80,6 +120,13 @@ interface ParsedContract {
   deps: string[];
 }
 
+/**
+ * @purpose Parses the body of an @contract tag into discrete pre/post/throws/side-effects/deps clauses.
+ * @contract pre: contractText is the raw text following an @contract tag (may contain multiple clauses in any order).
+ *   post: returns a ParsedContract; "side-effects: none" is recognized as no side effects rather than the literal string "none"; each "throws: X when Y" clause is split into {errorType: X, condition: Y}, falling back to the whole clause as errorType when the "when" pattern is absent; "deps" is split on commas.
+ *   side-effects: none.
+ * @audience technical
+ */
 function parseContractClauses(contractText: string): ParsedContract {
   const clauseAlternation = CONTRACT_CLAUSES.join("|");
   const pattern = new RegExp(`(${clauseAlternation}):([\\s\\S]*?)(?=(?:${clauseAlternation}):|$)`, "gi");
@@ -121,6 +168,10 @@ function parseContractClauses(contractText: string): ParsedContract {
   return result;
 }
 
+/**
+ * @purpose Structured form of a whole annotation comment: its purpose text, requirement IDs, audience tags, and parsed contract, ready to be assembled into a DocNode.
+ * @audience technical
+ */
 interface ParsedAnnotations {
   purpose: string | null;
   requirements: string[];
@@ -128,6 +179,13 @@ interface ParsedAnnotations {
   contract: ParsedContract | null;
 }
 
+/**
+ * @purpose Turns a raw JSDoc-style comment's text into the full set of annotation fields (purpose, requirement IDs, audience list, parsed contract) used to build a DocNode.
+ * @contract pre: commentText is the full text of a comment node.
+ *   post: returns purpose as the raw @purpose text or null if absent; requirements as a comma-split list (empty if no @requirement tag); audience as a comma/whitespace-split list (empty if no @audience tag); contract as the result of parseContractClauses, or null if no @contract tag was present.
+ *   side-effects: none.
+ * @audience technical
+ */
 function parseAnnotations(commentText: string): ParsedAnnotations {
   const cleaned = cleanCommentText(commentText);
   const tags = splitTopLevelTags(cleaned);
@@ -149,17 +207,37 @@ function parseAnnotations(commentText: string): ParsedAnnotations {
   };
 }
 
+/**
+ * @purpose Reads the declared name (function/class/interface/type name) off a declaration node.
+ * @contract pre: declNode is a function_declaration, class_declaration, interface_declaration, or type_alias_declaration node.
+ *   post: returns the text of the first identifier/type_identifier child, or null if none is found.
+ *   side-effects: none.
+ * @audience technical
+ */
 function findEntityName(declNode: Parser.SyntaxNode): string | null {
   const nameNode = declNode.children.find((c) => c.type === "identifier" || c.type === "type_identifier");
   return nameNode ? nameNode.text : null;
 }
 
+/**
+ * @purpose Extracts the declaration's signature text (everything before its body) for storage in AgentContract.signature.
+ * @contract pre: declNode is a recognized declaration node; source is the full file text it was parsed from.
+ *   post: returns the trimmed source slice from the declaration's start up to (but not including) its body block, or the whole declaration text if it has no body (e.g. a type alias).
+ *   side-effects: none.
+ * @audience technical
+ */
 function extractSignature(declNode: Parser.SyntaxNode, source: string): string {
   const bodyChild = declNode.children.find((c) => BODY_NODE_TYPES.has(c.type));
   const end = bodyChild ? bodyChild.startIndex : declNode.endIndex;
   return source.slice(declNode.startIndex, end).trim();
 }
 
+/**
+ * @purpose Assembles an AgentContract record from an extracted signature and an optionally-parsed @contract tag, defaulting every list field to empty when no contract was written.
+ * @contract post: returns an AgentContract with the given signature and the parsed pre/post/side-effects/error-modes/deps, or empty arrays for any field parsed is null or omits.
+ *   side-effects: none.
+ * @audience technical
+ */
 function buildAgentContract(signature: string, parsed: ParsedContract | null): AgentContract {
   return {
     signature,
@@ -171,10 +249,22 @@ function buildAgentContract(signature: string, parsed: ParsedContract | null): A
   };
 }
 
+/**
+ * @purpose Assembles a HumanNarrative record from the extracted @purpose text; rationale, example, and gotchas are not yet parsed from comments so they're always left empty/null.
+ * @contract post: returns { purpose, rationale: null, example: null, gotchas: [] }.
+ *   side-effects: none.
+ * @audience technical
+ */
 function buildHumanNarrative(purpose: string | null): HumanNarrative {
   return { purpose, rationale: null, example: null, gotchas: [] };
 }
 
+/**
+ * @purpose Flattens parsed requirement IDs and audience values into the DocNode.tags string list, prefixed by kind so both can be filtered on later.
+ * @contract post: returns one "requirement:<id>" entry per requirement followed by one "audience:<value>" entry per audience value, in that order.
+ *   side-effects: none.
+ * @audience technical
+ */
 function buildTags(requirements: string[], audience: string[]): string[] {
   const tags: string[] = [];
   for (const r of requirements) tags.push(`requirement:${r}`);
@@ -182,6 +272,13 @@ function buildTags(requirements: string[], audience: string[]): string[] {
   return tags;
 }
 
+/**
+ * @purpose Derives which fields of a DocNode actually came from real extracted annotation content, so downstream consumers can tell "extracted" data from empty defaults.
+ * @contract pre: node has agentContract and humanNarrative populated (e.g. by buildAgentContract/buildHumanNarrative).
+ *   post: returns a map marking agentContract.signature/preconditions/postconditions/sideEffects/errorModes and humanNarrative.purpose as "extracted" whenever they are non-empty/non-null; fields that are empty or null are omitted from the map entirely.
+ *   side-effects: none.
+ * @audience technical
+ */
 function buildConfidence(node: Pick<DocNode, "agentContract" | "humanNarrative">): Record<string, Confidence> {
   const confidence: Record<string, Confidence> = {};
   if (node.agentContract.signature) confidence["agentContract.signature"] = "extracted";
@@ -193,6 +290,12 @@ function buildConfidence(node: Pick<DocNode, "agentContract" | "humanNarrative">
   return confidence;
 }
 
+/**
+ * @purpose Normalizes a top-level syntax node to the underlying declaration node the extractor understands, unwrapping export statements so "export function foo" and "function foo" are handled identically.
+ * @contract post: returns the node itself if its type is a function/class/interface/type-alias declaration; if it's an export_statement, returns its wrapped declaration child (or undefined if that child isn't a recognized declaration type); returns undefined for anything else, including an undefined input.
+ *   side-effects: none.
+ * @audience technical
+ */
 function resolveDeclaration(candidate: Parser.SyntaxNode | undefined): Parser.SyntaxNode | undefined {
   if (!candidate) return undefined;
   if (candidate.type === "export_statement") {
@@ -201,6 +304,14 @@ function resolveDeclaration(candidate: Parser.SyntaxNode | undefined): Parser.Sy
   return candidate.type in DECLARATION_TYPES ? candidate : undefined;
 }
 
+/**
+ * @purpose Reads a source file off disk and parses it into a tree-sitter syntax tree, selecting the grammar by file extension.
+ * @contract pre: filePath points to a readable file with a supported extension.
+ *   post: returns the parsed tree alongside the raw source text (the caller needs both for byte-offset slicing).
+ *   throws: Error when the file cannot be read (propagated from readFileSync).
+ *   side-effects: none.
+ * @audience technical
+ */
 function parseSourceFile(filePath: string): { tree: Parser.Tree; source: string } {
   const source = readFileSync(filePath, "utf8");
   const parser = new Parser();
@@ -208,7 +319,13 @@ function parseSourceFile(filePath: string): { tree: Parser.Tree; source: string 
   return { tree: parser.parse(source), source };
 }
 
-/** Counts every top-level exported function/class/interface/type declaration, with or without a doc comment -- the denominator for annotation coverage. */
+/**
+ * @purpose Counts every top-level function/class/interface/type declaration in a repo (exported or not, documented or not) to serve as the denominator for annotation-coverage metrics.
+ * @contract pre: repoRoot exists and is readable.
+ *   post: returns the total count of recognized top-level declarations across every file walkSourceFiles finds under repoRoot.
+ *   side-effects: none.
+ * @audience technical
+ */
 export function countDocumentableEntities(repoRoot: string): number {
   let count = 0;
   for (const filePath of walkSourceFiles(repoRoot)) {
@@ -220,6 +337,13 @@ export function countDocumentableEntities(repoRoot: string): number {
   return count;
 }
 
+/**
+ * @purpose Extracts every annotated entity in one source file into DocNode records: each JSDoc-style comment immediately followed by a recognized declaration becomes an entity node, and a leading comment with no declaration after it (and a real @purpose) becomes the file's module node.
+ * @contract pre: filePath is a source file parseSourceFile can read and parse; repoRoot is an ancestor directory used to compute the node's stable relative-path-based ID.
+ *   post: returns one DocNode per annotated declaration plus (at most) one module DocNode, each carrying its content hash, parsed agent contract, human narrative, tags, and derived confidence map; declarations or leading comments with no usable annotation are silently skipped.
+ *   side-effects: none.
+ * @audience technical
+ */
 export function extractFile(filePath: string, repoRoot: string): DocNode[] {
   const { tree, source } = parseSourceFile(filePath);
   const relativePath = relative(repoRoot, filePath);
@@ -280,10 +404,21 @@ export function extractFile(filePath: string, repoRoot: string): DocNode[] {
   return nodes;
 }
 
+/**
+ * @purpose Extracts DocNodes for every documentable file in a repo by walking its source tree and running extractFile on each.
+ * @contract pre: repoRoot exists and is readable.
+ *   post: returns the concatenation of extractFile's results across every file walkSourceFiles finds under repoRoot.
+ *   side-effects: none.
+ * @audience technical
+ */
 export function extractRepo(repoRoot: string): DocNode[] {
   return walkSourceFiles(repoRoot).flatMap((file) => extractFile(file, repoRoot));
 }
 
+/**
+ * @purpose Describes one top-level declaration that has no preceding doc comment at all, along with where a new annotation should be inserted.
+ * @audience technical
+ */
 export interface UndocumentedEntity {
   filePath: string;
   entityName: string;
@@ -294,11 +429,11 @@ export interface UndocumentedEntity {
 }
 
 /**
- * Every top-level declaration with NO preceding doc comment at all --
- * the bootstrap pipeline's input (Phase 9). Deliberately does not
- * consider whether a comment, if present, actually contains our known
- * tags: that's a different, not-yet-needed distinction ("has a comment
- * but it's not ours" vs "has no comment").
+ * @purpose Finds every top-level declaration that has no doc comment at all, to drive the backfill pipeline that inserts starter annotations (Phase 9).
+ * @contract pre: repoRoot exists and is readable.
+ *   post: returns one UndocumentedEntity per declaration whose immediately preceding top-level sibling is not a JSDoc-style comment; a declaration preceded by any JSDoc-style comment is treated as documented even if that comment doesn't use the known annotation tags -- distinguishing "has a comment but not ours" from "has no comment" is deliberately out of scope here.
+ *   side-effects: none.
+ * @audience technical
  */
 export function listUndocumentedEntities(repoRoot: string): UndocumentedEntity[] {
   const results: UndocumentedEntity[] = [];
@@ -332,7 +467,13 @@ export function listUndocumentedEntities(repoRoot: string): UndocumentedEntity[]
   return results;
 }
 
-/** Applies multiple comment insertions to one file's source, safely (in descending offset order so earlier insertions don't shift later ones). */
+/**
+ * @purpose Applies a batch of generated annotation comments to one file's source text in one pass.
+ * @contract pre: each insertion's insertionIndex is a valid byte offset into source (typically the start of a declaration, as produced by listUndocumentedEntities).
+ *   post: returns source with every commentBlock spliced in immediately before its insertionIndex, followed by a newline; insertions are applied in descending offset order internally so inserting one comment never shifts the offsets of insertions still pending.
+ *   side-effects: none.
+ * @audience technical
+ */
 export function insertAnnotationComments(source: string, insertions: Array<{ insertionIndex: number; commentBlock: string }>): string {
   const sorted = [...insertions].sort((a, b) => b.insertionIndex - a.insertionIndex);
   let result = source;

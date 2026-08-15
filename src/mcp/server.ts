@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+/**
+ * @purpose MCP stdio server for livingdocs-mcp: exposes the analyze_change, get_contract, update_doc, generate_rollup, and get_doc_history tools, borrowing the host agent's own model via MCP sampling instead of calling an LLM directly.
+ * @audience technical
+ */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -161,6 +165,12 @@ server.registerTool(
   },
 );
 
+/**
+ * @purpose Boots the MCP server by connecting it to a stdio transport, the standard entry point for an MCP stdio server process.
+ * @contract post: creates a StdioServerTransport and connects `server` to it; resolves once the connection is established.
+ *   side-effects: opens the process's stdio streams as the MCP transport.
+ * @audience technical
+ */
 async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);

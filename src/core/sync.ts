@@ -1,3 +1,7 @@
+/**
+ * @purpose Shared read-recompute-write cycle for the user guide and doc graph, used by both the MCP server's tools and the CLI's commands so the two surfaces can't drift apart.
+ * @audience technical
+ */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildEdges, loadGraph, saveGraph } from "./doc-graph.js";
@@ -24,26 +28,54 @@ import type { DocGraph, DocNode } from "./types.js";
 
 export const USER_GUIDE_FILENAME = "USER_GUIDE.md";
 
+/**
+ * @purpose Builds the absolute path to the repo's USER_GUIDE.md file.
+ * @contract pre: repoRoot is an absolute path to the repo root.
+ *   post: returns repoRoot joined with USER_GUIDE_FILENAME.
+ *   side-effects: none.
+ * @audience technical
+ */
 export function userGuidePath(repoRoot: string): string {
   return join(repoRoot, USER_GUIDE_FILENAME);
 }
 
+/**
+ * @purpose Reads the existing USER_GUIDE.md, or seeds a fresh one from package metadata if it doesn't exist yet.
+ * @contract post: returns the file's contents when USER_GUIDE.md exists, else a freshly seeded document built from package.json metadata.
+ *   side-effects: reads the filesystem (existsSync/readFileSync); no writes.
+ * @audience technical
+ */
 export function readUserGuide(repoRoot: string): string {
   const path = userGuidePath(repoRoot);
   if (existsSync(path)) return readFileSync(path, "utf8");
   return seedUserGuide(readPackageMeta(repoRoot));
 }
 
+/**
+ * @purpose Returns today's date as the date stamp used on revision rows/entries during a sync.
+ * @contract post: returns the current date in ISO date-only format (YYYY-MM-DD).
+ *   side-effects: none.
+ * @audience technical
+ */
 function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-/** undefined (not the sentinel) when there's no real commit to diff against next time. */
+/**
+ * @purpose Normalizes getCurrentCommit's "working-tree" sentinel into undefined so lastScannedCommit in the graph never records a fake commit hash.
+ * @contract post: returns the resolved commit hash, or undefined when the repo is on an uncommitted working tree (no real commit to diff against next time).
+ *   side-effects: none (reads the current commit via getCurrentCommit).
+ * @audience technical
+ */
 function resolveScannedCommit(repoRoot: string): string | undefined {
   const commit = getCurrentCommit(repoRoot);
   return commit === "working-tree" ? undefined : commit;
 }
 
+/**
+ * @purpose Options for syncUserGuide: whether to force-regenerate every section and which LLM adapter (if any) to use for the LLM-heavy rollups.
+ * @audience technical
+ */
 export interface SyncOptions {
   /** Force-regenerate every section's text even if nothing changed underneath (generate_rollup / `generate user-guide`). */
   force?: boolean;
@@ -55,6 +87,10 @@ export interface SyncOptions {
   llm?: LlmAdapter;
 }
 
+/**
+ * @purpose Return shape of syncUserGuide describing what happened during one read-recompute-write cycle: the updated nodes, the classified changes, which sections changed, whether a revision row was added, and the resulting document.
+ * @audience technical
+ */
 export interface SyncResult {
   currentNodes: DocNode[];
   changes: NodeChange[];
@@ -65,11 +101,11 @@ export interface SyncResult {
 }
 
 /**
- * Reads, recomputes, and writes the user guide + graph in one place --
- * shared by the MCP server's update_doc/generate_rollup tools and the
- * CLI's update/generate commands (build brief Phase 5: "CLI uses the
- * same core as the MCP server"), so the two surfaces can't drift the way
- * scanRepo's git-scoping once did between them.
+ * @purpose Reads, recomputes, and writes the user guide and doc graph in one shared cycle, used by both the MCP server's update_doc/generate_rollup tools and the CLI's update/generate commands so the two surfaces can't drift apart.
+ * @contract pre: repoRoot is the root of a git repo containing (or about to contain) USER_GUIDE.md and the doc graph.
+ *   post: scans the repo for AST changes, regenerates system-overview/getting-started (always) and core-features/troubleshooting (only when options.llm is supplied), appends any resulting revision-history rows and per-node entries, writes the updated graph and USER_GUIDE.md to disk, and returns the resulting nodes/changes/sections-changed/document.
+ *   side-effects: reads and writes the doc graph file and USER_GUIDE.md on disk; when options.llm is set, makes LLM completion calls for narrative and error-resolution generation.
+ * @audience technical
  */
 export async function syncUserGuide(repoRoot: string, options: SyncOptions = {}): Promise<SyncResult> {
   const previousGraph = loadGraph(repoRoot);

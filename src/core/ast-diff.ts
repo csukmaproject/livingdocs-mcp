@@ -1,7 +1,19 @@
+/**
+ * @purpose Compares a previously generated doc graph against freshly extracted nodes and classifies each difference as added, removed, unchanged, cosmetic, or contract-affecting.
+ * @audience technical
+ */
 import type { DocGraph, DocNode } from "./types.js";
 
+/**
+ * @purpose Enumerates the possible outcomes of comparing a node's previous and current state.
+ * @audience technical
+ */
 export type ChangeClassification = "added" | "removed" | "unchanged" | "cosmetic" | "contract-affecting";
 
+/**
+ * @purpose Describes a single classified difference between a previous and current doc node.
+ * @audience technical
+ */
 export interface NodeChange {
   nodeId: string;
   previousNodeId?: string;
@@ -9,10 +21,24 @@ export interface NodeChange {
   reason: string;
 }
 
+/**
+ * @purpose Normalizes whitespace so two pieces of text can be compared while ignoring purely cosmetic formatting differences (line breaks, repeated spaces).
+ * @contract pre: none.
+ *   post: returns text with all runs of whitespace collapsed to a single space and leading/trailing whitespace trimmed.
+ *   side-effects: none.
+ * @audience technical
+ */
 function normalizeWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+/**
+ * @purpose Determines whether two nodes' documented agent contracts (preconditions, postconditions, side effects, error modes, dependencies) are identical, ignoring everything else about the node.
+ * @contract pre: none.
+ *   post: returns true when the JSON-serialized contract fields of a and b are equal, false otherwise.
+ *   side-effects: none.
+ * @audience technical
+ */
 function contractFieldsEqual(a: DocNode, b: DocNode): boolean {
   const key = (n: DocNode) =>
     JSON.stringify({
@@ -25,6 +51,13 @@ function contractFieldsEqual(a: DocNode, b: DocNode): boolean {
   return key(a) === key(b);
 }
 
+/**
+ * @purpose Classifies how a node changed between two versions once it's known to be the same nodeId in both, distinguishing changes that matter to an agent's contract-level view from ones that don't.
+ * @contract pre: previous and current share the same nodeId (i.e. they are already a matched pair).
+ *   post: returns "unchanged" when contentHash is identical; "contract-affecting" when the signature or documented contract differs; otherwise "cosmetic" (only prose/body text changed while signature and contract stayed byte-identical).
+ *   side-effects: none.
+ * @audience technical
+ */
 function classifyMatchedPair(previous: DocNode, current: DocNode): NodeChange {
   if (previous.contentHash === current.contentHash) {
     return { nodeId: current.nodeId, classification: "unchanged", reason: "content hash unchanged" };
@@ -49,10 +82,11 @@ function classifyMatchedPair(previous: DocNode, current: DocNode): NodeChange {
 }
 
 /**
- * Pairs likely renames: same file + entityType, declaration identical apart
- * from the entity's own name. Needed because nodeId is name-derived, so a
- * plain rename would otherwise look like an unrelated remove+add instead of
- * one cosmetic change. Best-effort heuristic, not a guarantee.
+ * @purpose Pairs likely renames -- same file and entityType, with a declaration identical apart from the entity's own name -- so a plain rename is reported as one cosmetic change instead of an unrelated remove+add. Needed because nodeId is name-derived.
+ * @contract pre: none.
+ *   post: returns a map from each added candidate's nodeId to its matched removed candidate, for pairs whose signatures are equal once each entity's own name is stripped out; each removed candidate is consumed by at most one pair. Best-effort heuristic, not a guarantee of an actual rename.
+ *   side-effects: none.
+ * @audience technical
  */
 function findRenamePairs(removedCandidates: DocNode[], addedCandidates: DocNode[]): Map<string, DocNode> {
   const pairs = new Map<string, DocNode>();
@@ -75,6 +109,13 @@ function findRenamePairs(removedCandidates: DocNode[], addedCandidates: DocNode[
   return pairs;
 }
 
+/**
+ * @purpose Computes the full set of classified changes between a previous doc graph and the current set of extracted nodes -- the core comparison used to report what changed in a scan.
+ * @contract pre: none.
+ *   post: returns one NodeChange per current node matched to a previous node by nodeId (classified via classifyMatchedPair); one per current node that is new or a detected rename of an unmatched previous node (via findRenamePairs); and one "removed" entry per previous node that neither matched nor was identified as a rename source.
+ *   side-effects: none.
+ * @audience technical
+ */
 export function diffGraph(previous: DocGraph, currentNodes: DocNode[]): NodeChange[] {
   const changes: NodeChange[] = [];
   const previousById = new Map(previous.nodes.map((n) => [n.nodeId, n]));
