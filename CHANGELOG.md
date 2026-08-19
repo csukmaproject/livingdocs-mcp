@@ -3,6 +3,17 @@
 All notable changes to this project are documented here. Semantic
 versioning from `1.0.0` onward.
 
+## [1.1.0]
+
+### Added
+- Claude Code plugin marketplace support: `.claude-plugin/marketplace.json`
+  at the repo root, plus a `plugin/` directory
+  (`.claude-plugin/plugin.json`, bundled `.mcp.json`, and the
+  `livingdocs-sync` skill) so the repo installs directly with
+  `/plugin marketplace add csukmaproject/livingdocs-mcp` and
+  `/plugin install livingdocs@livingdocs-mcp` -- no manual `.mcp.json`
+  edit or `CLAUDE.md` paste required.
+
 ## [1.0.0]
 
 Feature-complete v1: every document type in `docgen-plugin-plan.md`

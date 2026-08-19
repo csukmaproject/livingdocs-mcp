@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "livingdocs": {
+      "command": "npx",
+      "args": ["-y", "@csukmaproject/livingdocs-mcp"]
+    }
+  }
+}

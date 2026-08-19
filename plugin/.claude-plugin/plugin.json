@@ -1,0 +1,11 @@
+{
+  "name": "livingdocs",
+  "displayName": "livingdocs",
+  "description": "Keeps software documentation in permanent sync with code via lightweight @purpose/@requirement/@contract/@audience annotations. Bundles the livingdocs MCP server and a skill that tells Claude Code when to call analyze_change, get_contract, update_doc, generate_rollup, and get_doc_history.",
+  "version": "1.1.0",
+  "author": { "name": "csukmaproject", "url": "https://github.com/csukmaproject" },
+  "homepage": "https://github.com/csukmaproject/livingdocs-mcp",
+  "repository": "https://github.com/csukmaproject/livingdocs-mcp",
+  "license": "MIT",
+  "keywords": ["mcp", "model-context-protocol", "documentation", "docs-as-code", "ast"]
+}

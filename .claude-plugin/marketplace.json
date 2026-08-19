@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "livingdocs-mcp",
+  "owner": {
+    "name": "csukmaproject",
+    "url": "https://github.com/csukmaproject"
+  },
+  "description": "Marketplace for the livingdocs MCP server + CLI: keeps software documentation in permanent sync with code via lightweight @purpose/@requirement/@contract/@audience annotations.",
+  "plugins": [
+    {
+      "name": "livingdocs",
+      "source": "./plugin",
+      "description": "Bundles the livingdocs MCP server (analyze_change, get_contract, update_doc, generate_rollup, get_doc_history) and the livingdocs-sync skill, so project docs stay in sync with code without hand-editing.",
+      "category": "documentation"
+    }
+  ]
+}

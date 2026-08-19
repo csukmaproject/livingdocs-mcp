@@ -72,7 +72,7 @@ function warnIfNoApiKey(): void {
 }
 
 const program = new Command();
-program.name("livingdocs").description("Keeps software documentation in permanent sync with code.").version("1.0.0");
+program.name("livingdocs").description("Keeps software documentation in permanent sync with code.").version("1.1.0");
 
 program
   .command("scan")

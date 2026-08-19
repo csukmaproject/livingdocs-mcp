@@ -18,7 +18,7 @@ import {
 } from "../core/index.js";
 import { SamplingProvider } from "../core/llm-adapter.js";
 
-const server = new McpServer({ name: "livingdocs-mcp", version: "1.0.0" });
+const server = new McpServer({ name: "livingdocs-mcp", version: "1.1.0" });
 
 // Borrows the host agent's own model via MCP sampling -- nothing in this
 // server calls an LLM directly outside of this one adapter instance.

@@ -1,16 +1,8 @@
-<!--
-livingdocs adapter for Claude Code.
+---
+description: Use when working in a repo with livingdocs annotations (@purpose/@requirement/@contract/@audience) -- before describing what changed in the codebase, before committing a change that touches an annotated entity, or right after such a change lands -- to keep USER_GUIDE.md and the other generated documents in sync via the livingdocs MCP tools instead of hand-editing them or re-deriving facts from source.
+---
 
-Copy the stanza below into this project's CLAUDE.md (or append if one
-already exists). Requires the livingdocs MCP server registered in
-.mcp.json -- see the README's "Use with an AI coding agent" table.
-
-If you installed this repo as a Claude Code plugin instead, this stanza
-is already provided as the `livingdocs-sync` skill -- no need to paste it
-manually.
--->
-
-## livingdocs
+# Keep docs in sync with livingdocs
 
 This project's documentation is kept in sync with code via the livingdocs
 MCP server. Prefer its tools over hand-editing `USER_GUIDE.md` or

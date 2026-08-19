@@ -71,6 +71,18 @@ hand-editing `USER_GUIDE.md`.
 | Cursor | `.cursor/mcp.json` | [`cursor-rules.template`](adapters/cursor-rules.template) |
 | Windsurf | its MCP settings (same `mcpServers` shape) | use the Claude Code snippet as a base |
 
+### Claude Code: install as a plugin (recommended)
+
+    /plugin marketplace add csukmaproject/livingdocs-mcp
+    /plugin install livingdocs@livingdocs-mcp
+
+This registers the `livingdocs` MCP server and installs the
+`livingdocs-sync` skill (same guidance as
+[`CLAUDE.md.template`](adapters/CLAUDE.md.template)) in one step -- no
+manual `.mcp.json` edit or `CLAUDE.md` paste needed. Use the manual route
+below instead if you do not use Claude Code's plugin system, want to pin an
+exact commit/tag, or use a different host.
+
 **Claude Code** — add to `.mcp.json` in your project root:
 
 ```json

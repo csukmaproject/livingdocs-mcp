@@ -3,6 +3,6 @@ import { CORE_VERSION } from "../src/core/index.js";
 
 describe("scaffold", () => {
   it("exposes a core version", () => {
-    expect(CORE_VERSION).toBe("1.0.0");
+    expect(CORE_VERSION).toBe("1.1.0");
   });
 });
