@@ -13,6 +13,31 @@ versioning from `1.0.0` onward.
   `/plugin marketplace add csukmaproject/livingdocs-mcp` and
   `/plugin install livingdocs@livingdocs-mcp` -- no manual `.mcp.json`
   edit or `CLAUDE.md` paste required.
+- Multi-language support: Go, Python, and Java join TypeScript/JavaScript
+  as fully-supported languages for extraction, `scan`/`update`/`status`,
+  and `bootstrap`'s LLM backfill -- each via a pluggable `LanguageAdapter`
+  (`src/core/languages/`) rather than hardcoded TS/JS logic. Go's `//`
+  doc-comment runs, Python's docstrings (including the correct
+  first-statement-of-body insertion point for backfill), and Java's
+  Javadoc (distinct `block_comment`/`line_comment` node types) are each
+  handled per their own idiomatic convention. Two new `EntityType` values,
+  `struct` and `enum`, cover Go structs and Java enums.
+- `scan`/`status` now print a distinct "No supported source files found"
+  message (naming every registered extension) for a repo in an
+  unsupported language, instead of the same "No changes since last scan"
+  message a genuinely up-to-date scan would print -- previously the two
+  cases were indistinguishable.
+- `readPackageMeta` no longer requires a `package.json`: a non-npm repo
+  (Go/Python/Java/...) now gets a directory-name-based fallback instead of
+  crashing `update`/`generate`, and the generated Getting Started section
+  omits the npm-specific install snippet for such repos rather than
+  render an incorrect one.
+
+### Fixed
+- `bootstrap`'s test-file signal source now matches every registered
+  language's test-file convention (`_test.go`, `test_*.py`/`*_test.py`,
+  `*Test.java`) via the file's basename, not just TypeScript/JavaScript's
+  `.test.`/`.spec.` suffix tested against the full path.
 
 ## [1.0.0]
 

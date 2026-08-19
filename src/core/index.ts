@@ -4,6 +4,7 @@ export * from "./types.js";
 export * from "./hash-store.js";
 export * from "./doc-graph.js";
 export * from "./extractor.js";
+export * from "./languages/registry.js";
 export * from "./ast-diff.js";
 export * from "./rollup-engine.js";
 export * from "./llm-adapter.js";
