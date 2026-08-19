@@ -2,8 +2,8 @@
  * @purpose Renders the doc graph into human-facing document rollups (User Guide sections, Agent Contract Reference, SRS, Technical Guide, Business Guide, PRD) via pure, mechanical templating over already-extracted graph data.
  * @audience technical
  */
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DocGraph, DocNode } from "./types.js";
 
@@ -17,19 +17,22 @@ export interface PackageMeta {
   version?: string;
   bin?: Record<string, string> | string;
   scripts?: Record<string, string>;
+  /** False when there was no package.json to read (a non-npm repo) -- readPackageMeta sets this; generateGettingStarted uses it to skip the npm-specific install snippet rather than render a wrong one. Defaults to true so a PackageMeta built directly (e.g. in tests) without this field still gets the npm install line. */
+  hasPackageJson?: boolean;
 }
 
 /**
- * @purpose Loads and parses a repo's package.json so its metadata can feed the doc rollups.
- * @contract pre: repoRoot contains a readable, valid-JSON package.json.
- *   post: returns the parsed package.json as PackageMeta.
- *   throws: Error when the file does not exist or is unreadable.
- *   throws: SyntaxError when the file's contents are not valid JSON.
- *   side-effects: reads a file from disk.
+ * @purpose Loads and parses a repo's package.json so its metadata can feed the doc rollups, falling back to the repo directory's own name when there is no package.json at all -- a non-npm repo (Go/Python/Java/...) has no such file, and that must not crash doc generation for it.
+ * @contract pre: if repoRoot/package.json exists, it is readable and valid JSON.
+ *   post: returns the parsed package.json as PackageMeta when the file exists; otherwise returns { name: basename(repoRoot) } with every other field left undefined.
+ *   throws: SyntaxError when package.json exists but its contents are not valid JSON.
+ *   side-effects: reads a file from disk, if present.
  * @audience technical
  */
 export function readPackageMeta(repoRoot: string): PackageMeta {
-  return JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as PackageMeta;
+  const path = join(repoRoot, "package.json");
+  if (!existsSync(path)) return { name: basename(repoRoot), hasPackageJson: false };
+  return { ...(JSON.parse(readFileSync(path, "utf8")) as PackageMeta), hasPackageJson: true };
 }
 
 /**
@@ -63,12 +66,12 @@ export function generateSystemOverview(graph: DocGraph, pkg: PackageMeta): strin
 /**
  * @purpose Renders User Guide Section 3 (Getting Started): install command, bin entries, and npm scripts, sourced entirely from package.json. Zero LLM calls.
  * @contract pre: none.
- *   post: returns markdown text with an install snippet plus bin/script listings when present.
+ *   post: returns markdown text with an install snippet plus bin/script listings when present; when pkg.hasPackageJson is false (a non-npm repo), omits the npm-specific install snippet entirely rather than render a wrong one, since bin/scripts are necessarily absent too in that case.
  *   side-effects: none.
  * @audience technical
  */
 export function generateGettingStarted(pkg: PackageMeta): string {
-  const lines: string[] = ["Install:", "", "```bash", `npm install ${pkg.name}`, "```"];
+  const lines: string[] = pkg.hasPackageJson === false ? [] : ["Install:", "", "```bash", `npm install ${pkg.name}`, "```"];
 
   const bins = typeof pkg.bin === "string" ? { [pkg.name]: pkg.bin } : pkg.bin;
   if (bins && Object.keys(bins).length > 0) {

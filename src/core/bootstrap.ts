@@ -4,11 +4,16 @@
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { countDocumentableEntities, extractRepo, insertAnnotationComments, listUndocumentedEntities, walkSourceFiles } from "./extractor.js";
 import { parseJsonArrayResponse } from "./narrative-generator.js";
+import { allTestFilePatterns, adapterFor } from "./languages/registry.js";
+import { typescriptAdapter } from "./languages/typescript.js";
+import type { ProposedAnnotation } from "./languages/types.js";
 import type { LlmAdapter } from "./llm-adapter.js";
 import type { UndocumentedEntity } from "./extractor.js";
+
+export type { ProposedAnnotation };
 
 // docgen-plugin-plan.md Section 3: collected once, never re-asked --
 // business rationale has no trace in code, so the LLM shouldn't be asked
@@ -80,19 +85,28 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-const TEST_FILE_PATTERN = /\.(test|spec)\.[jt]sx?$/;
+/**
+ * @purpose Recognizes a test file by matching its basename (not full path) against every registered LanguageAdapter's testFilePattern -- required because Python's `test_*.py` prefix convention must be checked against the basename, since a prefix anchor tested against an absolute path would never match.
+ * @contract post: returns true iff basename(filePath) matches some registered adapter's testFilePattern.
+ *   side-effects: none.
+ * @audience technical
+ */
+function isTestFile(filePath: string): boolean {
+  const name = basename(filePath);
+  return allTestFilePatterns().some((pattern) => pattern.test(name));
+}
 
 /**
  * Signal source #2 (docgen-plugin-plan.md Section 3): which test files mention an entity by name.
  *
  * @purpose Finds, for each undocumented entity, which test files reference its name by a whole-word match, as a signal for what the entity is used for.
  * @contract pre: entity.filePath values are relative to repoRoot.
- *   post: returns a map from "filePath#entityName" to the list of relative test-file paths (matching .test./.spec.) whose content mentions that name as a whole word, excluding the entity's own file; entities with no matches are omitted from the map.
+ *   post: returns a map from "filePath#entityName" to the list of relative test-file paths (matching some registered language's test-file convention) whose content mentions that name as a whole word, excluding the entity's own file; entities with no matches are omitted from the map.
  *   side-effects: none (reads test files from disk; writes nothing).
  * @audience technical
  */
 export function mineTestReferences(repoRoot: string, entities: UndocumentedEntity[]): Map<string, string[]> {
-  const testFiles = walkSourceFiles(repoRoot).filter((f) => TEST_FILE_PATTERN.test(f));
+  const testFiles = walkSourceFiles(repoRoot).filter(isTestFile);
   const references = new Map<string, string[]>();
   for (const entity of entities) {
     const key = `${entity.filePath}#${entity.entityName}`;
@@ -216,19 +230,6 @@ export function probeBehavior(): Map<string, string[]> {
 }
 
 /**
- * @purpose Shape of one LLM-synthesized documentation proposal for a single entity, before it is rendered into a comment block.
- * @audience technical
- */
-export interface ProposedAnnotation {
-  key: string;
-  purpose: string;
-  contractPre: string[];
-  contractPost: string[];
-  contractSideEffects: string;
-  audience: string[];
-}
-
-/**
  * @purpose Bundles one undocumented entity together with all of its mined signals (test references, co-changed files, naming cluster) as input to synthesis-prompt construction.
  * @audience technical
  */
@@ -299,21 +300,13 @@ function parseSynthesisResponse(text: string): ProposedAnnotation[] {
 }
 
 /**
- * @purpose Renders one ProposedAnnotation into the literal /** *\/ comment text (matching the docs/annotation-tags.md schema) that gets inserted above an entity, always prefixed with an "INFERRED ... please review" marker line, so inferred content can never be mistaken for human-authored fact.
+ * @purpose Renders one ProposedAnnotation into the literal /** *\/ comment text (matching the docs/annotation-tags.md schema) that gets inserted above an entity, always prefixed with an "INFERRED ... please review" marker line, so inferred content can never be mistaken for human-authored fact. Kept as a stable, TS/JS-specific public export for backward compatibility -- multi-language bootstrap now renders through each entity's own LanguageAdapter.formatAnnotation instead (see runBootstrap), since Go/Python/Java each need a different comment/docstring syntax.
  * @contract post: returns a multi-line string: opening "/**", the INFERRED marker line, "@purpose", an "@contract" line whose clauses include "pre:"/"post:" only when the corresponding array is non-empty and always include "side-effects:" (defaulting to "none"), an "@audience" line, and the closing "*\/".
  *   side-effects: none.
  * @audience technical
  */
 export function formatAnnotationComment(proposed: ProposedAnnotation): string {
-  const lines = ["/**", " * INFERRED by livingdocs bootstrap -- please review before relying on this.", ` * @purpose ${proposed.purpose}`];
-  const clauses: string[] = [];
-  if (proposed.contractPre.length > 0) clauses.push(`pre: ${proposed.contractPre.join(". ")}.`);
-  if (proposed.contractPost.length > 0) clauses.push(`post: ${proposed.contractPost.join(". ")}.`);
-  clauses.push(`side-effects: ${proposed.contractSideEffects || "none"}.`);
-  lines.push(` * @contract ${clauses.join(" ")}`);
-  lines.push(` * @audience ${proposed.audience.join(", ")}`);
-  lines.push(" */");
-  return lines.join("\n");
+  return typescriptAdapter.formatAnnotation(proposed, "");
 }
 
 /**
@@ -501,10 +494,11 @@ export async function runBootstrap(repoRoot: string, options: BootstrapOptions):
   const filesChanged: string[] = [];
   for (const [filePath, fileEntities] of entitiesByFile) {
     const absPath = join(repoRoot, filePath);
+    const adapter = adapterFor(filePath)!;
     const insertions = fileEntities
       .map((entity) => {
         const proposed = proposalByKey.get(`${entity.filePath}#${entity.entityName}`);
-        return proposed ? { insertionIndex: entity.insertionIndex, commentBlock: formatAnnotationComment(proposed) } : null;
+        return proposed ? { insertionIndex: entity.insertionIndex, commentBlock: adapter.formatAnnotation(proposed, entity.indent) } : null;
       })
       .filter((x): x is { insertionIndex: number; commentBlock: string } => x !== null);
     if (insertions.length === 0) continue;

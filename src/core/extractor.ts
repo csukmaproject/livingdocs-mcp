@@ -1,26 +1,16 @@
 /**
- * @purpose Parses TypeScript/JavaScript source files with tree-sitter to find top-level declarations and their attached JSDoc-style annotation comments, turning the frozen @purpose/@contract/@audience tag schema into structured DocNode records for the rest of the pipeline.
+ * @purpose Parses source files with tree-sitter to find top-level declarations and their attached doc-comments/docstrings, turning the frozen @purpose/@contract/@audience tag schema into structured DocNode records for the rest of the pipeline. Delegates every language-specific decision (which grammar, which node types, which comment/docstring convention) to a LanguageAdapter from ./languages/registry.js -- this file only implements the shared, language-agnostic tag-parsing pipeline and orchestration.
  * @audience technical
  */
 import { extname, join, relative } from "node:path";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import Parser from "tree-sitter";
-import TypeScriptLanguages from "tree-sitter-typescript";
-import JavaScriptLanguage from "tree-sitter-javascript";
+import { adapterFor, isSupportedExtension } from "./languages/registry.js";
+import type { LanguageAdapter } from "./languages/types.js";
 import { computeContentHash } from "./hash-store.js";
 import type { AgentContract, Confidence, DocNode, EntityType, ErrorMode, HumanNarrative } from "./types.js";
 
 const IGNORED_DIRS = new Set(["node_modules", "dist", ".git", ".livingdocs"]);
-const SUPPORTED_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx"]);
-
-const DECLARATION_TYPES: Record<string, EntityType> = {
-  function_declaration: "function",
-  class_declaration: "class",
-  interface_declaration: "interface",
-  type_alias_declaration: "type",
-};
-
-const BODY_NODE_TYPES = new Set(["statement_block", "class_body", "interface_body", "object_type"]);
 
 const KNOWN_TAGS = ["purpose", "requirement", "contract", "audience"] as const;
 /**
@@ -32,9 +22,9 @@ type KnownTag = (typeof KNOWN_TAGS)[number];
 const CONTRACT_CLAUSES = ["pre", "post", "throws", "side-effects", "deps"] as const;
 
 /**
- * @purpose Recursively collects every source file under a directory that the extractor knows how to parse, skipping build/vendor/vcs folders.
+ * @purpose Recursively collects every source file under a directory that some registered LanguageAdapter knows how to parse, skipping build/vendor/vcs folders.
  * @contract pre: rootDir exists and is readable.
- *   post: returns the absolute paths of all files under rootDir (recursively) whose extension is in SUPPORTED_EXTENSIONS, excluding IGNORED_DIRS subtrees.
+ *   post: returns the absolute paths of all files under rootDir (recursively) whose extension is recognized by some registered LanguageAdapter, excluding IGNORED_DIRS subtrees.
  *   throws: Error when rootDir does not exist or a subdirectory is not readable (propagated from readdirSync/statSync).
  *   side-effects: none.
  * @audience technical
@@ -51,7 +41,7 @@ export function walkSourceFiles(rootDir: string): string[] {
       const stat = statSync(fullPath);
       if (stat.isDirectory()) {
         stack.push(fullPath);
-      } else if (SUPPORTED_EXTENSIONS.has(extname(entry))) {
+      } else if (isSupportedExtension(extname(entry))) {
         results.push(fullPath);
       }
     }
@@ -60,38 +50,8 @@ export function walkSourceFiles(rootDir: string): string[] {
 }
 
 /**
- * @purpose Picks the tree-sitter grammar to parse a file with, based on its extension.
- * @contract post: returns the TSX grammar for .tsx, the TypeScript grammar for .ts, and the JavaScript grammar for anything else (.js/.jsx).
- *   side-effects: none.
- * @audience technical
- */
-function languageFor(filePath: string) {
-  const ext = extname(filePath);
-  if (ext === ".tsx") return TypeScriptLanguages.tsx;
-  if (ext === ".ts") return TypeScriptLanguages.typescript;
-  return JavaScriptLanguage;
-}
-
-/**
- * @purpose Strips block-comment decoration (leading slash-star-star, trailing star-slash, per-line leading asterisks) from a raw comment's text so only the annotation content remains.
- * @contract pre: raw is the full text of a comment node, including its delimiters.
- *   post: returns the de-commented, trimmed body text.
- *   side-effects: none.
- * @audience technical
- */
-function cleanCommentText(raw: string): string {
-  return raw
-    .replace(/^\/\*\*?/, "")
-    .replace(/\*\/$/, "")
-    .split("\n")
-    .map((line) => line.replace(/^\s*\*\s?/, ""))
-    .join("\n")
-    .trim();
-}
-
-/**
- * @purpose Splits a cleaned annotation comment body into its top-level @purpose/@requirement/@contract/@audience sections, keyed by tag name.
- * @contract pre: cleaned is the de-commented text produced by cleanCommentText.
+ * @purpose Splits a cleaned annotation comment/docstring body into its top-level @purpose/@requirement/@contract/@audience sections, keyed by tag name.
+ * @contract pre: cleaned is already-cleaned text (comment/docstring delimiters already stripped by the owning LanguageAdapter).
  *   post: returns a map from each known tag found to its raw text; a tag repeated more than once has its occurrences joined with newlines; tags absent from the comment are omitted from the result.
  *   side-effects: none.
  * @audience technical
@@ -180,15 +140,14 @@ interface ParsedAnnotations {
 }
 
 /**
- * @purpose Turns a raw JSDoc-style comment's text into the full set of annotation fields (purpose, requirement IDs, audience list, parsed contract) used to build a DocNode.
- * @contract pre: commentText is the full text of a comment node.
+ * @purpose Turns an already-cleaned doc-comment/docstring's text (delimiters already stripped by the owning LanguageAdapter) into the full set of annotation fields (purpose, requirement IDs, audience list, parsed contract) used to build a DocNode.
+ * @contract pre: cleanedText is already-cleaned annotation text, as returned by a LanguageAdapter's findDocComment/findModuleDoc.
  *   post: returns purpose as the raw @purpose text or null if absent; requirements as a comma-split list (empty if no @requirement tag); audience as a comma/whitespace-split list (empty if no @audience tag); contract as the result of parseContractClauses, or null if no @contract tag was present.
  *   side-effects: none.
  * @audience technical
  */
-function parseAnnotations(commentText: string): ParsedAnnotations {
-  const cleaned = cleanCommentText(commentText);
-  const tags = splitTopLevelTags(cleaned);
+function parseAnnotations(cleanedText: string): ParsedAnnotations {
+  const tags = splitTopLevelTags(cleanedText);
   return {
     purpose: tags.purpose ?? null,
     requirements: tags.requirement
@@ -205,31 +164,6 @@ function parseAnnotations(commentText: string): ParsedAnnotations {
       : [],
     contract: tags.contract ? parseContractClauses(tags.contract) : null,
   };
-}
-
-/**
- * @purpose Reads the declared name (function/class/interface/type name) off a declaration node.
- * @contract pre: declNode is a function_declaration, class_declaration, interface_declaration, or type_alias_declaration node.
- *   post: returns the text of the first identifier/type_identifier child, or null if none is found.
- *   side-effects: none.
- * @audience technical
- */
-function findEntityName(declNode: Parser.SyntaxNode): string | null {
-  const nameNode = declNode.children.find((c) => c.type === "identifier" || c.type === "type_identifier");
-  return nameNode ? nameNode.text : null;
-}
-
-/**
- * @purpose Extracts the declaration's signature text (everything before its body) for storage in AgentContract.signature.
- * @contract pre: declNode is a recognized declaration node; source is the full file text it was parsed from.
- *   post: returns the trimmed source slice from the declaration's start up to (but not including) its body block, or the whole declaration text if it has no body (e.g. a type alias).
- *   side-effects: none.
- * @audience technical
- */
-function extractSignature(declNode: Parser.SyntaxNode, source: string): string {
-  const bodyChild = declNode.children.find((c) => BODY_NODE_TYPES.has(c.type));
-  const end = bodyChild ? bodyChild.startIndex : declNode.endIndex;
-  return source.slice(declNode.startIndex, end).trim();
 }
 
 /**
@@ -291,36 +225,73 @@ function buildConfidence(node: Pick<DocNode, "agentContract" | "humanNarrative">
 }
 
 /**
- * @purpose Normalizes a top-level syntax node to the underlying declaration node the extractor understands, unwrapping export statements so "export function foo" and "function foo" are handled identically.
- * @contract post: returns the node itself if its type is a function/class/interface/type-alias declaration; if it's an export_statement, returns its wrapped declaration child (or undefined if that child isn't a recognized declaration type); returns undefined for anything else, including an undefined input.
- *   side-effects: none.
+ * @purpose Assembles a DocNode for one annotated declaration.
  * @audience technical
  */
-function resolveDeclaration(candidate: Parser.SyntaxNode | undefined): Parser.SyntaxNode | undefined {
-  if (!candidate) return undefined;
-  if (candidate.type === "export_statement") {
-    return candidate.children.find((c) => c.type in DECLARATION_TYPES);
-  }
-  return candidate.type in DECLARATION_TYPES ? candidate : undefined;
+function buildNode(
+  relativePath: string,
+  entityName: string,
+  entityType: EntityType,
+  signature: string,
+  annotations: ParsedAnnotations,
+  contentHash: string,
+): DocNode {
+  const node: DocNode = {
+    nodeId: `${relativePath}#${entityName}:${entityType}`,
+    filePath: relativePath,
+    entityName,
+    entityType,
+    contentHash,
+    agentContract: buildAgentContract(signature, annotations.contract),
+    humanNarrative: buildHumanNarrative(annotations.purpose),
+    confidence: {},
+    revisionHistory: [],
+    tags: buildTags(annotations.requirements, annotations.audience),
+  };
+  node.confidence = buildConfidence(node);
+  return node;
 }
 
 /**
- * @purpose Reads a source file off disk and parses it into a tree-sitter syntax tree, selecting the grammar by file extension.
- * @contract pre: filePath points to a readable file with a supported extension.
- *   post: returns the parsed tree alongside the raw source text (the caller needs both for byte-offset slicing).
- *   throws: Error when the file cannot be read (propagated from readFileSync).
+ * @purpose Assembles the module-level DocNode for one file's leading doc-comment/docstring.
+ * @audience technical
+ */
+function buildModuleNode(relativePath: string, annotations: ParsedAnnotations, contentHash: string): DocNode {
+  const node: DocNode = {
+    nodeId: `${relativePath}#module`,
+    filePath: relativePath,
+    entityName: relativePath,
+    entityType: "module",
+    contentHash,
+    agentContract: buildAgentContract("", null),
+    humanNarrative: buildHumanNarrative(annotations.purpose),
+    confidence: {},
+    revisionHistory: [],
+    tags: buildTags(annotations.requirements, annotations.audience),
+  };
+  node.confidence = buildConfidence(node);
+  return node;
+}
+
+/**
+ * @purpose Reads a source file off disk and parses it into a tree-sitter syntax tree, resolving both the grammar and the LanguageAdapter to use from the file's extension.
+ * @contract pre: filePath points to a readable file with an extension some registered LanguageAdapter recognizes.
+ *   post: returns the parsed tree, the raw source text, and the resolved adapter.
+ *   throws: Error when the file cannot be read (propagated from readFileSync), or when no adapter is registered for filePath's extension.
  *   side-effects: none.
  * @audience technical
  */
-function parseSourceFile(filePath: string): { tree: Parser.Tree; source: string } {
+function parseSourceFile(filePath: string): { tree: Parser.Tree; source: string; adapter: LanguageAdapter } {
+  const adapter = adapterFor(filePath);
+  if (!adapter) throw new Error(`No language adapter registered for extension of ${filePath}`);
   const source = readFileSync(filePath, "utf8");
   const parser = new Parser();
-  parser.setLanguage(languageFor(filePath) as Parameters<Parser["setLanguage"]>[0]);
-  return { tree: parser.parse(source), source };
+  parser.setLanguage(adapter.languageFor(filePath) as Parameters<Parser["setLanguage"]>[0]);
+  return { tree: parser.parse(source), source, adapter };
 }
 
 /**
- * @purpose Counts every top-level function/class/interface/type declaration in a repo (exported or not, documented or not) to serve as the denominator for annotation-coverage metrics.
+ * @purpose Counts every top-level declaration this adapter recognizes in a repo (exported or not, documented or not) to serve as the denominator for annotation-coverage metrics.
  * @contract pre: repoRoot exists and is readable.
  *   post: returns the total count of recognized top-level declarations across every file walkSourceFiles finds under repoRoot.
  *   side-effects: none.
@@ -329,75 +300,49 @@ function parseSourceFile(filePath: string): { tree: Parser.Tree; source: string 
 export function countDocumentableEntities(repoRoot: string): number {
   let count = 0;
   for (const filePath of walkSourceFiles(repoRoot)) {
-    const { tree } = parseSourceFile(filePath);
+    const { tree, adapter } = parseSourceFile(filePath);
     for (const child of tree.rootNode.children) {
-      if (resolveDeclaration(child)) count++;
+      if (adapter.resolveDeclaration(child)) count++;
     }
   }
   return count;
 }
 
 /**
- * @purpose Extracts every annotated entity in one source file into DocNode records: each JSDoc-style comment immediately followed by a recognized declaration becomes an entity node, and a leading comment with no declaration after it (and a real @purpose) becomes the file's module node.
+ * @purpose Extracts every annotated entity in one source file into DocNode records: each top-level declaration with an attached doc-comment/docstring (per its LanguageAdapter's findDocComment) becomes an entity node, and the file's module-level doc (per findModuleDoc) becomes its module node.
  * @contract pre: filePath is a source file parseSourceFile can read and parse; repoRoot is an ancestor directory used to compute the node's stable relative-path-based ID.
- *   post: returns one DocNode per annotated declaration plus (at most) one module DocNode, each carrying its content hash, parsed agent contract, human narrative, tags, and derived confidence map; declarations or leading comments with no usable annotation are silently skipped.
+ *   post: returns one DocNode per annotated declaration plus (at most) one module DocNode, each carrying its content hash, parsed agent contract, human narrative, tags, and derived confidence map; declarations or leading docs with no usable annotation are silently skipped.
  *   side-effects: none.
  * @audience technical
  */
 export function extractFile(filePath: string, repoRoot: string): DocNode[] {
-  const { tree, source } = parseSourceFile(filePath);
+  const { tree, source, adapter } = parseSourceFile(filePath);
   const relativePath = relative(repoRoot, filePath);
-  const nodes: DocNode[] = [];
   const topLevel = tree.rootNode.children;
+  const nodes: DocNode[] = [];
 
   for (let i = 0; i < topLevel.length; i++) {
-    const child = topLevel[i];
-    if (!child || child.type !== "comment" || !child.text.startsWith("/**")) continue;
+    const declNode = adapter.resolveDeclaration(topLevel[i]);
+    if (!declNode) continue;
+    const entityType = adapter.entityTypeFor(declNode);
+    const entityName = adapter.findEntityName(declNode);
+    if (!entityType || !entityName) continue;
 
-    const declNode = resolveDeclaration(topLevel[i + 1]);
+    const doc = adapter.findDocComment(declNode, topLevel, i, source);
+    if (!doc) continue;
 
-    if (declNode) {
-      const entityType = DECLARATION_TYPES[declNode.type];
-      const entityName = findEntityName(declNode);
-      if (!entityType || !entityName) continue;
+    const annotations = parseAnnotations(doc.text);
+    const signature = adapter.extractSignature(declNode, source);
+    nodes.push(
+      buildNode(relativePath, entityName, entityType, signature, annotations, computeContentHash(source.slice(doc.hashRangeStart, declNode.endIndex))),
+    );
+  }
 
-      const annotations = parseAnnotations(child.text);
-      const signature = extractSignature(declNode, source);
-      const nodeId = `${relativePath}#${entityName}:${entityType}`;
-
-      const node: DocNode = {
-        nodeId,
-        filePath: relativePath,
-        entityName,
-        entityType,
-        contentHash: computeContentHash(source.slice(child.startIndex, declNode.endIndex)),
-        agentContract: buildAgentContract(signature, annotations.contract),
-        humanNarrative: buildHumanNarrative(annotations.purpose),
-        confidence: {},
-        revisionHistory: [],
-        tags: buildTags(annotations.requirements, annotations.audience),
-      };
-      node.confidence = buildConfidence(node);
-      nodes.push(node);
-    } else if (i === 0) {
-      // A leading doc comment not attached to a declaration documents the module itself.
-      const annotations = parseAnnotations(child.text);
-      if (annotations.purpose) {
-        const node: DocNode = {
-          nodeId: `${relativePath}#module`,
-          filePath: relativePath,
-          entityName: relativePath,
-          entityType: "module",
-          contentHash: computeContentHash(source.slice(child.startIndex, child.endIndex)),
-          agentContract: buildAgentContract("", null),
-          humanNarrative: buildHumanNarrative(annotations.purpose),
-          confidence: {},
-          revisionHistory: [],
-          tags: buildTags(annotations.requirements, annotations.audience),
-        };
-        node.confidence = buildConfidence(node);
-        nodes.push(node);
-      }
+  const moduleDoc = adapter.findModuleDoc(topLevel, source);
+  if (moduleDoc) {
+    const annotations = parseAnnotations(moduleDoc.text);
+    if (annotations.purpose) {
+      nodes.push(buildModuleNode(relativePath, annotations, computeContentHash(source.slice(moduleDoc.hashRangeStart, moduleDoc.hashRangeEnd))));
     }
   }
 
@@ -416,7 +361,7 @@ export function extractRepo(repoRoot: string): DocNode[] {
 }
 
 /**
- * @purpose Describes one top-level declaration that has no preceding doc comment at all, along with where a new annotation should be inserted.
+ * @purpose Describes one top-level declaration that has no doc-comment/docstring at all, along with where and how (per its LanguageAdapter's planUndocumentedInsertion) a new annotation should be inserted.
  * @audience technical
  */
 export interface UndocumentedEntity {
@@ -424,43 +369,46 @@ export interface UndocumentedEntity {
   entityName: string;
   entityType: EntityType;
   signature: string;
-  /** Byte offset where a new annotation comment should be inserted (start of the `export`/declaration line). */
+  /** Byte offset to splice the rendered annotation text at -- see LanguageAdapter.planUndocumentedInsertion. */
   insertionIndex: number;
+  /** Indentation to apply to every line of the rendered annotation text -- see LanguageAdapter.planUndocumentedInsertion. */
+  indent: string;
 }
 
 /**
- * @purpose Finds every top-level declaration that has no doc comment at all, to drive the backfill pipeline that inserts starter annotations (Phase 9).
+ * @purpose Finds every top-level declaration that has no doc-comment/docstring at all, to drive the backfill pipeline that inserts starter annotations (Phase 9).
  * @contract pre: repoRoot exists and is readable.
- *   post: returns one UndocumentedEntity per declaration whose immediately preceding top-level sibling is not a JSDoc-style comment; a declaration preceded by any JSDoc-style comment is treated as documented even if that comment doesn't use the known annotation tags -- distinguishing "has a comment but not ours" from "has no comment" is deliberately out of scope here.
+ *   post: returns one UndocumentedEntity per declaration for which its LanguageAdapter's findDocComment returns null; a declaration with any doc-comment/docstring is treated as documented even if it doesn't use the known annotation tags -- distinguishing "has a doc but not ours" from "has none" is deliberately out of scope here.
  *   side-effects: none.
  * @audience technical
  */
 export function listUndocumentedEntities(repoRoot: string): UndocumentedEntity[] {
   const results: UndocumentedEntity[] = [];
   for (const absPath of walkSourceFiles(repoRoot)) {
-    const { tree, source } = parseSourceFile(absPath);
+    const { tree, source, adapter } = parseSourceFile(absPath);
     const relativePath = relative(repoRoot, absPath);
     const topLevel = tree.rootNode.children;
 
     for (let i = 0; i < topLevel.length; i++) {
-      const child = topLevel[i];
-      if (!child) continue;
-      const declNode = resolveDeclaration(child);
+      const rawCandidate = topLevel[i];
+      if (!rawCandidate) continue;
+      const declNode = adapter.resolveDeclaration(rawCandidate);
       if (!declNode) continue;
-      const entityType = DECLARATION_TYPES[declNode.type];
-      const entityName = findEntityName(declNode);
+      const entityType = adapter.entityTypeFor(declNode);
+      const entityName = adapter.findEntityName(declNode);
       if (!entityType || !entityName) continue;
 
-      const preceding = topLevel[i - 1];
-      const hasDocComment = Boolean(preceding && preceding.type === "comment" && preceding.text.startsWith("/**"));
-      if (hasDocComment) continue;
+      const hasDoc = adapter.findDocComment(declNode, topLevel, i, source) !== null;
+      if (hasDoc) continue;
 
+      const plan = adapter.planUndocumentedInsertion(declNode, rawCandidate, source);
       results.push({
         filePath: relativePath,
         entityName,
         entityType,
-        signature: extractSignature(declNode, source),
-        insertionIndex: child.startIndex,
+        signature: adapter.extractSignature(declNode, source),
+        insertionIndex: plan.insertionIndex,
+        indent: plan.indent,
       });
     }
   }

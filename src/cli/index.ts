@@ -8,6 +8,7 @@ import { createInterface } from "node:readline/promises";
 import { Command } from "commander";
 import { ApiKeyProvider } from "../core/llm-adapter.js";
 import {
+  allSupportedExtensions,
   countDocumentableEntities,
   generateDocument,
   loadGraph,
@@ -17,6 +18,7 @@ import {
   scanRepo,
   syncUserGuide,
   userGuidePath,
+  walkSourceFiles,
   GENERATED_DOCUMENT_TYPES,
   SEED_QUESTIONS,
 } from "../core/index.js";
@@ -33,6 +35,18 @@ const SECTION_KEYS = ["system-overview", "getting-started", "core-features", "tr
  */
 function resolveRepoRoot(repoOption: string): string {
   return resolve(repoOption);
+}
+
+/**
+ * @purpose Checks whether a repo has zero files any registered LanguageAdapter recognizes, and if so prints a distinct message naming the supported extensions -- so a repo in an unsupported language (or with no code at all) is never confused with a genuinely up-to-date scan, which would otherwise print the exact same "No changes" message despite never having scanned anything.
+ * @contract post: returns true and logs a "no supported source files" message (naming every registered extension) when walkSourceFiles(repoRoot) is empty; returns false and logs nothing otherwise.
+ *   side-effects: writes to stdout via console.log when there are no supported files.
+ * @audience technical
+ */
+function warnIfNoSupportedFiles(repoRoot: string): boolean {
+  if (walkSourceFiles(repoRoot).length > 0) return false;
+  console.log(`No supported source files found under ${repoRoot} (supported: ${allSupportedExtensions().join(", ")}).`);
+  return true;
 }
 
 /**
@@ -80,6 +94,7 @@ program
   .option("-r, --repo <path>", "target repo path", ".")
   .action((opts: { repo: string }) => {
     const repoRoot = resolveRepoRoot(opts.repo);
+    if (warnIfNoSupportedFiles(repoRoot)) return;
     const previousGraph = loadGraph(repoRoot);
     const { changes } = scanRepo(repoRoot, previousGraph);
     const meaningful = changes.filter((c) => c.classification !== "unchanged");
@@ -158,6 +173,7 @@ program
   .option("-r, --repo <path>", "target repo path", ".")
   .action((opts: { repo: string }) => {
     const repoRoot = resolveRepoRoot(opts.repo);
+    if (warnIfNoSupportedFiles(repoRoot)) return;
     const graph = loadGraph(repoRoot);
     const { changes } = scanRepo(repoRoot, graph);
     const stale = changes.filter((c) => c.classification !== "unchanged");

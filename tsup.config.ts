@@ -13,7 +13,7 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   splitting: false,
-  external: ["tree-sitter", "tree-sitter-typescript", "tree-sitter-javascript"],
+  external: ["tree-sitter", "tree-sitter-typescript", "tree-sitter-javascript", "tree-sitter-go", "tree-sitter-python", "tree-sitter-java"],
   onSuccess: async () => {
     // src/templates must stay a sibling of dist/core the same way it's a
     // sibling of src/core, since rollup-engine resolves it relative to itself.

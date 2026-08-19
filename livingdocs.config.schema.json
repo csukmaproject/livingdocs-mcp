@@ -42,7 +42,9 @@
         "endpoint",
         "service",
         "variable",
-        "constant"
+        "constant",
+        "struct",
+        "enum"
       ]
     },
     "contentHash": {

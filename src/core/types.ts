@@ -19,7 +19,9 @@ export type EntityType =
   | "endpoint"
   | "service"
   | "variable"
-  | "constant";
+  | "constant"
+  | "struct"
+  | "enum";
 
 /**
  * @purpose Labels how a DocNode field's value was obtained: parsed straight from an annotation comment, confirmed by a human, or inferred without a source annotation.

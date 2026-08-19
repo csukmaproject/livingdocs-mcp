@@ -14,6 +14,28 @@ extraction through the bootstrap pipeline and CI integration. See
 [`CHANGELOG.md`](CHANGELOG.md) for what changed since `0.1.0`, and
 `docgen-plugin-plan.md` for the full architecture rationale.
 
+## Supported languages
+
+| Language | Extensions | Doc-comment convention |
+|---|---|---|
+| TypeScript / JavaScript | `.ts` `.tsx` `.js` `.jsx` | JSDoc-style `/** @purpose ... */` above a declaration |
+| Go | `.go` | A contiguous `//` doc-comment run (no blank line before the declaration) or a `/** ... */` block, above a declaration |
+| Python | `.py` | A docstring -- the first statement inside a function/class body, or the first statement of the file for a module doc |
+| Java | `.java` | Javadoc-style `/** @purpose ... */` above a class/interface/enum |
+
+Each language is a pluggable adapter (`src/core/languages/`), so extraction,
+`bootstrap`'s backfill, and every generated document work the same way
+regardless of which language a repo is written in. Running `scan`/`status`
+against a repo with no files in any supported language prints a clear
+"No supported source files found" message (naming the extensions above)
+instead of the same "No changes" message a genuinely up-to-date scan would
+show -- the two cases are never conflated. A few v1 scope limits worth
+knowing: only top-level declarations are recognized (methods nested inside
+a Java/Python class body, or a JS/TS class's own methods, aren't extracted
+individually); Go's grouped `type ( A; B )` blocks are skipped rather than
+guessed at; and Java's `bootstrap` backfill doesn't yet write a
+`package-info.java`-style module doc.
+
 ## Quickstart
 
 ```bash
@@ -185,9 +207,10 @@ npm run lint
 ```
 
 Fixtures live in `test/fixtures/` (`documented`, `undocumented`,
-`greenfield`) and are exercised by both the unit tests and the CLI
-integration tests, which spawn the actual built binary rather than only
-testing the underlying functions. `.github/workflows/ci.yml` runs the
+`greenfield` for TypeScript, plus a `documented-<lang>`/`undocumented-<lang>`
+pair per additional language) and are exercised by both the unit tests and
+the CLI integration tests, which spawn the actual built binary rather than
+only testing the underlying functions. `.github/workflows/ci.yml` runs the
 full suite on every push/PR.
 
 ## License
