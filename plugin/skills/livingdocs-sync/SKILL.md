@@ -22,3 +22,8 @@ re-reading source to answer questions the graph already has.
   `generate_rollup` with `type: "user-guide"`.
 - To see when and why something last changed, call `get_doc_history`
   (per-node, or document-level if no nodeId is given).
+- For a repo that has never used livingdocs (call `get_status` first --
+  0% coverage, no stale nodes, means nothing has been annotated yet), call
+  `bootstrap_repo` to propose initial `@purpose`/`@contract` annotations
+  for every undocumented entity. It commits to a fresh branch and may open
+  a PR -- tell the user what it's about to do before calling it.

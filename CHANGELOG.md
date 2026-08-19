@@ -3,6 +3,29 @@
 All notable changes to this project are documented here. Semantic
 versioning from `1.0.0` onward.
 
+## [1.1.1]
+
+### Added
+- Two new MCP tools for repos that have never used livingdocs before:
+  `get_status` (coverage %, stale nodes, last-sync date per section --
+  the MCP equivalent of `livingdocs status`) and `bootstrap_repo` (the
+  MCP equivalent of `livingdocs bootstrap`: mines code/test/git-history/
+  naming signals and proposes `@purpose`/`@contract` annotations via a
+  new branch/PR, using the connected host's own model through MCP
+  sampling instead of `ANTHROPIC_API_KEY` -- works the same whether the
+  host is a CLI-based agentic tool or a desktop agentic app). Every host
+  now exposes seven tools instead of five.
+- README: a consolidated "Getting Started" section (install -> point at
+  your repo -> every command/tool explained) replacing the old, thinner
+  Quickstart. Later revised into a redundancy-free Install/Usage/CI split,
+  with every `generate` document type's exact command now spelled out.
+- 7 explicit Claude Code plugin slash commands, one per function
+  (`/livingdocs:scan`, `status`, `update`, `generate`, `contract`,
+  `history`, `bootstrap`), so typing `/livingdocs:` lists every available
+  action without reading documentation. The existing `livingdocs-sync`
+  skill (auto-triggered contextual guidance) is unchanged; these are
+  separate, explicitly-invoked entry points.
+
 ## [1.1.0]
 
 ### Added

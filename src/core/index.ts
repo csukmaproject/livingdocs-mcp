@@ -1,4 +1,4 @@
-export const CORE_VERSION = "1.1.0";
+export const CORE_VERSION = "1.1.1";
 
 export * from "./types.js";
 export * from "./hash-store.js";
